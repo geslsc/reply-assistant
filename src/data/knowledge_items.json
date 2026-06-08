@@ -1,0 +1,146 @@
+[
+  {
+    "id": "op-login",
+    "common_questions": [
+      "怎麼登入後台",
+      "如何登入客立樂",
+      "登入步驟"
+    ],
+    "standard_answer": "請開啟客立樂後台登入頁,輸入您的帳號與密碼後,點選「登入」即可進入後台首頁。",
+    "can_public_reply": true,
+    "status": "可用",
+    "risk_level": "low"
+  },
+  {
+    "id": "op-password-reset",
+    "common_questions": [
+      "忘記密碼怎麼辦",
+      "如何重設密碼",
+      "密碼忘記了"
+    ],
+    "standard_answer": "請在登入頁點選「忘記密碼」,輸入註冊 Email,系統會寄送重設連結到您的信箱,請在 30 分鐘內完成重設。",
+    "can_public_reply": true,
+    "status": "可用",
+    "risk_level": "low"
+  },
+  {
+    "id": "op-order-view",
+    "common_questions": [
+      "哪裡看訂單",
+      "如何查看訂單",
+      "訂單在哪裡"
+    ],
+    "standard_answer": "登入後台後,點選左側選單「訂單管理」→「訂單列表」,即可查看所有訂單,可依日期或狀態篩選。",
+    "can_public_reply": true,
+    "status": "可用",
+    "risk_level": "low"
+  },
+  {
+    "id": "op-report-export",
+    "common_questions": [
+      "如何匯出報表",
+      "報表怎麼下載",
+      "匯出銷售報表"
+    ],
+    "standard_answer": "進入「報表中心」→ 選擇報表類型 → 設定日期區間 → 點選「匯出 Excel」,檔案會下載到您的電腦。",
+    "can_public_reply": true,
+    "status": "可用",
+    "risk_level": "low"
+  },
+  {
+    "id": "op-product-add",
+    "common_questions": [
+      "如何新增商品",
+      "怎麼上架商品",
+      "新增產品步驟"
+    ],
+    "standard_answer": "進入「商品管理」→「新增商品」,填寫商品名稱、價格、庫存等必填欄位,上傳圖片後點選「儲存並上架」。",
+    "can_public_reply": true,
+    "status": "可用",
+    "risk_level": "low"
+  },
+  {
+    "id": "op-inventory",
+    "common_questions": [
+      "如何調整庫存",
+      "庫存怎麼修改",
+      "更新庫存數量"
+    ],
+    "standard_answer": "進入「商品管理」→ 找到該商品 → 點選「編輯」→ 修改「庫存數量」欄位 → 點選「儲存」。",
+    "can_public_reply": true,
+    "status": "可用",
+    "risk_level": "low"
+  },
+  {
+    "id": "op-member-register",
+    "common_questions": [
+      "如何註冊會員",
+      "會員怎麼加入",
+      "新增會員步驟"
+    ],
+    "standard_answer": "進入「會員管理」→「新增會員」,填寫姓名、手機、Email 等資料,點選「建立會員」即可完成。",
+    "can_public_reply": true,
+    "status": "可用",
+    "risk_level": "low"
+  },
+  {
+    "id": "op-payment-settings",
+    "common_questions": [
+      "如何設定付款方式",
+      "金流怎麼設定",
+      "修改付款設定"
+    ],
+    "standard_answer": "進入「商店設定」→「付款方式」,勾選要啟用的付款選項,填寫金流帳號資訊後儲存。此操作會影響收款,建議由顧問確認後再執行。",
+    "can_public_reply": false,
+    "status": "可用",
+    "risk_level": "mid"
+  },
+  {
+    "id": "troubleshoot-login-fail",
+    "common_questions": [
+      "登入一直失敗",
+      "登不進去怎麼辦",
+      "帳號密碼正確但登入不了"
+    ],
+    "standard_answer": "請先確認:1) 帳號密碼是否正確 2) 是否開啟大寫鎖定 3) 瀏覽器是否為最新版。若仍無法登入,請提供錯誤訊息截圖給顧問協助排查。",
+    "can_public_reply": false,
+    "status": "可用",
+    "risk_level": "mid"
+  },
+  {
+    "id": "troubleshoot-sync-error",
+    "common_questions": [
+      "資料同步失敗",
+      "同步錯誤怎麼處理",
+      "庫存同步不了"
+    ],
+    "standard_answer": "同步錯誤可能與網路或第三方 API 有關。請先確認網路連線正常,再至「系統設定」→「同步紀錄」查看錯誤代碼,並將代碼提供給顧問。",
+    "can_public_reply": false,
+    "status": "可用",
+    "risk_level": "mid"
+  },
+  {
+    "id": "troubleshoot-blank-screen",
+    "common_questions": [
+      "畫面一片空白",
+      "後台打開是白畫面",
+      "頁面載入不出來"
+    ],
+    "standard_answer": "白畫面可能與瀏覽器快取或擴充套件衝突有關。請先清除快取並改用無痕模式測試,若仍異常請立即聯繫顧問,勿自行修改系統設定。",
+    "can_public_reply": false,
+    "status": "可用",
+    "risk_level": "high"
+  },
+  {
+    "id": "official-cs-redirect",
+    "common_questions": [
+      "我要找官方客服",
+      "官方客服電話",
+      "聯繫客立樂客服"
+    ],
+    "standard_answer": "如需官方客服協助,請撥打客立樂客服專線 0800-123-456,服務時間為週一至週五 09:00-18:00,或至官網填寫客服表單。",
+    "can_public_reply": true,
+    "status": "可用",
+    "risk_level": "unknown"
+  }
+]

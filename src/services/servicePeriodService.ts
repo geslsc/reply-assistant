@@ -1,0 +1,113 @@
+import { Actor, BotReply, EventType, SERVICE_PERIOD_DAYS } from '../types';
+import { createEvent } from './eventLogService';
+import {
+  getGroupFlags,
+  isInServicePeriod,
+  isServiceExpired,
+  updateGroupFlags,
+} from './groupFlags';
+
+const INTRO_MESSAGE = `您好,我是客立樂教學小助手,會在顧問協助下回答常見操作問題。
+接下來這段教學協助期間,若有常見操作問題可以直接在群組詢問。
+如果這步驟和您畫面不一樣,再跟我說,或等顧問確認喔。`;
+
+const ALREADY_ACTIVE_MESSAGE =
+  '我已經在這個群組待命囉,接下來有常見操作問題可以直接在群組裡詢問。';
+
+const REACTIVATION_CONFIRM_PROMPT =
+  '您確定要重新啟用教學協助期嗎?請回覆「確認重新啟用」以繼續。';
+
+export async function handleServiceIntroduction(
+  groupId: string,
+  consultantUserId: string
+): Promise<BotReply[]> {
+  if (await isInServicePeriod(groupId)) {
+    return [{ type: 'group', text: ALREADY_ACTIVE_MESSAGE }];
+  }
+
+  if (await isServiceExpired(groupId)) {
+    return [{ type: 'group', text: '教學協助期已結束,請使用「重新啟用教學協助期」指令。' }];
+  }
+
+  const now = new Date();
+  const end = new Date(now);
+  end.setDate(end.getDate() + SERVICE_PERIOD_DAYS);
+
+  await updateGroupFlags(groupId, {
+    serviceStartAt: now.toISOString(),
+    serviceEndAt: end.toISOString(),
+  });
+
+  await createEvent({
+    event_type: EventType.STATE_TRANSITION,
+    group_id: groupId,
+    issue_thread_id: null,
+    actor: Actor.CONSULTANT,
+    actor_user_id: consultantUserId,
+    from_state: null,
+    to_state: null,
+    detail: 'service period started',
+  });
+
+  return [{ type: 'group', text: INTRO_MESSAGE }];
+}
+
+export async function handleServiceReactivationRequest(
+  groupId: string,
+  _consultantUserId: string
+): Promise<BotReply[]> {
+  await updateGroupFlags(groupId, { serviceReactivationPending: true });
+  return [{ type: 'group', text: REACTIVATION_CONFIRM_PROMPT }];
+}
+
+export async function handleServiceReactivationConfirm(
+  groupId: string,
+  consultantUserId: string
+): Promise<BotReply[]> {
+  const flags = await getGroupFlags(groupId);
+  if (!flags.serviceReactivationPending) {
+    return [];
+  }
+
+  const now = new Date();
+  const end = new Date(now);
+  end.setDate(end.getDate() + SERVICE_PERIOD_DAYS);
+
+  await updateGroupFlags(groupId, {
+    serviceStartAt: now.toISOString(),
+    serviceEndAt: end.toISOString(),
+    serviceReactivationPending: false,
+  });
+
+  await createEvent({
+    event_type: EventType.STATE_TRANSITION,
+    group_id: groupId,
+    issue_thread_id: null,
+    actor: Actor.CONSULTANT,
+    actor_user_id: consultantUserId,
+    from_state: null,
+    to_state: null,
+    detail: 'service period reactivated',
+  });
+
+  return [{ type: 'group', text: INTRO_MESSAGE }];
+}
+
+export async function isOutOfService(groupId: string): Promise<boolean> {
+  const flags = await getGroupFlags(groupId);
+  if (!flags.serviceStartAt) {
+    return true;
+  }
+  return !(await isInServicePeriod(groupId));
+}
+
+export async function getServiceDay(groupId: string): Promise<number | null> {
+  const flags = await getGroupFlags(groupId);
+  if (!flags.serviceStartAt) {
+    return null;
+  }
+  const start = new Date(flags.serviceStartAt);
+  const now = new Date();
+  const diffMs = now.getTime() - start.getTime();
+  return Math.floor(diffMs / (1000 * 60 * 60 * 24)) + 1;
+}
