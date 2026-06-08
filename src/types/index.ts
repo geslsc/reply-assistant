@@ -101,6 +101,7 @@ export interface ConsultantRecord {
   inviteCode: string | null;
   displayName: string | null;
   createdAt: string;
+  lastKnowledgeExportAt?: string | null;
 }
 
 /** @deprecated 請改用 KnowledgeCard；保留別名供既有程式過渡 */
@@ -129,6 +130,8 @@ export interface BotReply {
   type: 'group' | 'push';
   userId?: string;
   text: string;
+  /** 知識卡待審推送：供記錄 bot messageId → reviewId */
+  trackReviewId?: string;
 }
 
 export interface ProcessResult {

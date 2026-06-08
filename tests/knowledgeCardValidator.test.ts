@@ -84,7 +84,7 @@ describe('Knowledge Card Draft Service', () => {
     setLlmClient(null);
     const result = await generateKnowledgeCardDraft({
       operation: 'create',
-      consultantRequest: '整理登入知識卡',
+      consultantRequest: '整理知識卡：店家遇到登入不了',
     });
     expect(result.kind).toBe('single_card');
     if (result.kind === 'single_card') {

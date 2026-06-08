@@ -6,7 +6,7 @@ import { loadEnv, resetEnvCache } from '../src/config/env';
 import { dropAllTables, resetDatabase, setPoolForTests, closePool } from '../src/db/client';
 import { createPostgresRepositories } from '../src/repositories/postgresRepositories';
 import { initRepositories } from '../src/repositories';
-import { loadKnowledgeBase, matchKnowledgeCard, pauseCard } from '../src/services/knowledgeBaseService';
+import { initKnowledgeBase, matchKnowledgeCard, pauseCard } from '../src/services/knowledgeBaseService';
 import { settleGroupTimeouts } from '../src/services/passiveTimeoutSettlement';
 import {
   createIssueThread,
@@ -32,7 +32,7 @@ describePg('PostgreSQL Integration Tests', () => {
     setPoolForTests(pool);
     await resetDatabase(pool);
     await initRepositories('postgres');
-    loadKnowledgeBase();
+    await initKnowledgeBase();
   });
 
   afterAll(async () => {
@@ -51,6 +51,8 @@ describePg('PostgreSQL Integration Tests', () => {
     await repos.events.clear();
     await repos.consultants.clear();
     await repos.knowledgeOverrides.clear();
+    await repos.knowledgeCards.clear();
+    await initKnowledgeBase();
   });
 
   it('migration creates schema successfully', async () => {

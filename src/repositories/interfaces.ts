@@ -71,6 +71,8 @@ export interface ConsultantRepository {
   findActive(): Promise<ConsultantRecord[]>;
   findPending(): Promise<ConsultantRecord[]>;
   findActiveAdmins(): Promise<ConsultantRecord[]>;
+  setLastKnowledgeExportAt(userId: string, exportedAt: string): Promise<void>;
+  getLastKnowledgeExportAt(userId: string): Promise<string | null>;
   clear(): Promise<void>;
 }
 
@@ -87,5 +89,8 @@ export interface Repositories {
   events: EventLogRepository;
   consultants: ConsultantRepository;
   knowledgeOverrides: KnowledgeOverrideRepository;
+  knowledgeCards: import('./knowledgeCardTypes').KnowledgeCardRepository;
   pendingHandoffs: import('./pendingHandoffTypes').PendingHandoffRepository;
+  pendingKnowledgeReviews: import('./pendingKnowledgeReviewTypes').PendingKnowledgeReviewRepository;
+  dmSessions: import('./dmSessionTypes').DmSessionRepository;
 }

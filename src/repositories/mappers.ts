@@ -57,6 +57,9 @@ export function mapConsultantRow(row: Record<string, unknown>): ConsultantRecord
     inviteCode: row.invite_code ? String(row.invite_code) : null,
     displayName: row.display_name ? String(row.display_name) : null,
     createdAt: new Date(String(row.created_at)).toISOString(),
+    lastKnowledgeExportAt: row.last_knowledge_export_at
+      ? new Date(String(row.last_knowledge_export_at)).toISOString()
+      : null,
   };
 }
 

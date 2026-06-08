@@ -23,6 +23,9 @@ import {
   Repositories,
 } from './interfaces';
 import { createMemoryPendingHandoffRepository } from './memoryPendingHandoffRepository';
+import { createMemoryKnowledgeCardRepository } from './memoryKnowledgeCardRepository';
+import { createMemoryPendingKnowledgeReviewRepository } from './memoryPendingKnowledgeReviewRepository';
+import { createMemoryDmSessionRepository } from './memoryDmSessionRepository';
 
 const VALID_EVENT_TYPES = new Set(Object.values(EventType));
 const VALID_ACTORS = new Set(Object.values(Actor));
@@ -47,6 +50,7 @@ export function createMemoryRepositories(): Repositories {
   const threads = new Map<string, IssueThread>();
   const events: EventLogEntry[] = [];
   const consultants = new Map<string, ConsultantRecord>();
+  const consultantExportAt = new Map<string, string>();
   const inviteCodes = new Map<string, string>();
   const overrides = new Map<string, KnowledgeOverride>();
 
@@ -245,9 +249,20 @@ export function createMemoryRepositories(): Repositories {
         (c) => c.status === ConsultantStatus.ACTIVE && c.role === ConsultantRole.ADMIN
       );
     },
+    async setLastKnowledgeExportAt(userId, exportedAt) {
+      consultantExportAt.set(userId, exportedAt);
+      const record = consultants.get(userId);
+      if (record) {
+        record.lastKnowledgeExportAt = exportedAt;
+      }
+    },
+    async getLastKnowledgeExportAt(userId) {
+      return consultantExportAt.get(userId) ?? consultants.get(userId)?.lastKnowledgeExportAt ?? null;
+    },
     async clear() {
       consultants.clear();
       inviteCodes.clear();
+      consultantExportAt.clear();
     },
   };
 
@@ -275,12 +290,25 @@ export function createMemoryRepositories(): Repositories {
     },
   };
 
+  const pendingKnowledgeReviews = createMemoryPendingKnowledgeReviewRepository();
+  const dmSessions = createMemoryDmSessionRepository(async (params) => {
+    await pendingKnowledgeReviews.insert({
+      reviewId: params.reviewId,
+      cardData: params.cardData,
+      submittedBy: params.submittedBy,
+      submittedAt: params.submittedAt,
+    });
+  });
+
   return {
     groups: groupRepo,
     threads: threadRepo,
     events: eventRepo,
     consultants: consultantRepo,
     knowledgeOverrides: overrideRepo,
+    knowledgeCards: createMemoryKnowledgeCardRepository(),
     pendingHandoffs: createMemoryPendingHandoffRepository(),
+    pendingKnowledgeReviews,
+    dmSessions,
   };
 }

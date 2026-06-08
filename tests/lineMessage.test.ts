@@ -12,7 +12,7 @@ import { TEST_ADMIN, TEST_CONSULTANT, TEST_CUSTOMER, TEST_GROUP } from './helper
 describe('LINE Reply / Push Tests', () => {
   it('uses replyMessage for low-risk public answer', async () => {
     const replyText = jest.fn().mockResolvedValue(undefined);
-    const pushText = jest.fn().mockResolvedValue(undefined);
+    const pushText = jest.fn().mockResolvedValue(null);
     setLineMessageClient({ replyText, pushText });
 
     await registerAdmin(TEST_ADMIN);
@@ -35,7 +35,7 @@ describe('LINE Reply / Push Tests', () => {
 
   it('uses pushMessage for consultant handoff', async () => {
     const replyText = jest.fn().mockResolvedValue(undefined);
-    const pushText = jest.fn().mockResolvedValue(undefined);
+    const pushText = jest.fn().mockResolvedValue(null);
     setLineMessageClient({ replyText, pushText });
 
     await registerAdmin(TEST_ADMIN);
@@ -71,7 +71,7 @@ describe('LINE Reply / Push Tests', () => {
 
   it('merges multiple group replies into one replyMessage call', async () => {
     const replyText = jest.fn().mockResolvedValue(undefined);
-    const pushText = jest.fn().mockResolvedValue(undefined);
+    const pushText = jest.fn().mockResolvedValue(null);
     setLineMessageClient({ replyText, pushText });
 
     const replies = [

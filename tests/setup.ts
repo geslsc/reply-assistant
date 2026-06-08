@@ -1,7 +1,11 @@
-import { loadEnv, resetEnvCache } from '../src/config/env';
+import { resetEnvCache, loadEnv } from '../src/config/env';
 import { resetRepositories } from '../src/repositories';
-import { loadKnowledgeBase } from '../src/services/knowledgeBaseService';
+import { initKnowledgeBase } from '../src/services/knowledgeBaseService';
 import { setLineMessageClient } from '../src/services/lineMessageService';
+import { clearAllPendingConfirmations } from '../src/services/consultantConfirmationService';
+import { clearKnowledgeCardWriteState } from '../src/services/knowledgeCardWriteService';
+import { clearBulkImportState } from '../src/services/knowledgeCardImportService';
+import { clearPrivateFallbackState } from '../src/services/privateFallbackHintService';
 
 beforeEach(async () => {
   resetEnvCache();
@@ -12,9 +16,13 @@ beforeEach(async () => {
     LINE_CHANNEL_ACCESS_TOKEN: 'test-access-token',
   });
   await resetRepositories('memory');
-  loadKnowledgeBase();
+  clearAllPendingConfirmations();
+  clearKnowledgeCardWriteState();
+  clearPrivateFallbackState();
+  clearBulkImportState();
+  await initKnowledgeBase();
   setLineMessageClient({
     replyText: jest.fn().mockResolvedValue(undefined),
-    pushText: jest.fn().mockResolvedValue(undefined),
+    pushText: jest.fn().mockImplementation(async (_userId, _text) => `mock-msg-${Date.now()}`),
   });
 });

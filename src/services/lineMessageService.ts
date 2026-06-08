@@ -4,9 +4,11 @@ import { logger } from '../config/logger';
 import { BotReply } from '../types';
 import { getActiveAdmins, getActiveConsultants } from './consultantWhitelist';
 
+import { registerReviewMessageMapping } from './knowledgeCardReviewService';
+
 export interface LineMessageClient {
   replyText(replyToken: string, text: string): Promise<void>;
-  pushText(userId: string, text: string): Promise<void>;
+  pushText(userId: string, text: string): Promise<string | null>;
 }
 
 let lineClient: LineMessageClient | null = null;
@@ -28,10 +30,11 @@ function createRealClient(): LineMessageClient {
       });
     },
     async pushText(userId, text) {
-      await client.pushMessage({
+      const response = await client.pushMessage({
         to: userId,
         messages: [{ type: 'text', text }],
       });
+      return response.sentMessages?.[0]?.id ?? null;
     },
   };
 }
@@ -64,14 +67,15 @@ export async function replyText(replyToken: string, text: string): Promise<void>
   }
 }
 
-export async function pushText(userId: string, text: string): Promise<void> {
+export async function pushText(userId: string, text: string): Promise<string | null> {
   try {
-    await getLineMessageClient().pushText(userId, text);
+    return await getLineMessageClient().pushText(userId, text);
   } catch (error) {
     logger.error('LINE pushMessage failed', {
       userId,
       error: error instanceof Error ? error.message : String(error),
     });
+    return null;
   }
 }
 
@@ -100,7 +104,10 @@ export async function deliverBotReplies(
 
   for (const reply of replies) {
     if (reply.type === 'push' && reply.userId) {
-      await pushText(reply.userId, reply.text);
+      const messageId = await pushText(reply.userId, reply.text);
+      if (reply.trackReviewId && messageId) {
+        await registerReviewMessageMapping(reply.trackReviewId, messageId);
+      }
     }
   }
 }

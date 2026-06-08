@@ -10,20 +10,15 @@ import {
   classifyConsultantIntent,
   ConsultantIntent,
   isConsultantPrivateAiIntent,
-  isDraftOnlyIntent,
   isDirectExecuteIntent,
   requiresConfirmation,
 } from './consultantIntentClassifier';
-import {
-  formatDraftReply,
-  generateKnowledgeCardDraft,
-} from './knowledgeCardDraftService';
-import { summarizeCustomerQuestionForConsultant } from './consultantPrivateAiService';
-import { getCardById, pauseLastReferencedCard } from './knowledgeBaseService';
-import { getActiveIssueThread } from './issueThreadService';
-import { canPauseKnowledgeCard, executeReplyToGroup } from './replyToGroupService';
 import { handleServiceIntroduction } from './servicePeriodService';
 import { isActiveAdmin, isActiveConsultantOrAdmin } from './consultantWhitelist';
+import { pauseLastReferencedCard } from './knowledgeBaseService';
+import { summarizeCustomerQuestionForConsultant } from './consultantPrivateAiService';
+import { getActiveIssueThread } from './issueThreadService';
+import { canPauseKnowledgeCard, executeReplyToGroup } from './replyToGroupService';
 
 export interface ConsultantActionContext {
   userId: string;
@@ -78,32 +73,6 @@ async function handleDirectIntent(
     default:
       return [];
   }
-}
-
-async function handleDraftIntent(
-  intent: ConsultantIntent,
-  ctx: ConsultantActionContext
-): Promise<BotReply[]> {
-  const operation =
-    intent === ConsultantIntent.ORGANIZE_KNOWLEDGE_CARD ? 'create' : 'modify';
-  const thread = ctx.groupId ? await getActiveIssueThread(ctx.groupId) : null;
-  const existingCard = thread?.lastKnowledgeCardId
-    ? getCardById(thread.lastKnowledgeCardId)
-    : null;
-
-  const result = await generateKnowledgeCardDraft({
-    operation,
-    consultantRequest: ctx.text,
-    existingCard,
-  });
-
-  return [
-    {
-      type: 'push',
-      userId: ctx.userId,
-      text: formatDraftReply(result),
-    },
-  ];
 }
 
 async function requestHighImpactConfirmation(
@@ -225,6 +194,15 @@ export async function handleConsultantNaturalLanguage(
   const classified = classifyConsultantIntent(ctx.text);
   const { intent } = classified;
 
+  if (!ctx.isGroup) {
+    if (/^補充[:：]/u.test(ctx.text.trim()) || /^修改[:：]/u.test(ctx.text.trim())) {
+      return null;
+    }
+    if (/^(幫我整理知識卡|整理知識卡|新增知識卡)$/.test(ctx.text.trim())) {
+      return null;
+    }
+  }
+
   if (intent === ConsultantIntent.UNKNOWN) {
     return null;
   }
@@ -250,8 +228,17 @@ export async function handleConsultantNaturalLanguage(
       });
       return [{ type: 'push', userId: ctx.userId, text }];
     }
-    if (isDraftOnlyIntent(intent)) {
-      return handleDraftIntent(intent, ctx);
+    if (
+      intent === ConsultantIntent.ORGANIZE_KNOWLEDGE_CARD ||
+      intent === ConsultantIntent.MODIFY_KNOWLEDGE_CARD
+    ) {
+      return [
+        {
+          type: 'push',
+          userId: ctx.userId,
+          text: '知識卡草稿整理請私訊「幫我整理知識卡」開始多步驟流程。',
+        },
+      ];
     }
   }
 

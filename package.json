@@ -10,6 +10,8 @@
     "test": "jest",
     "test:coverage": "jest --coverage",
     "db:migrate": "tsx src/db/migrate.ts",
+    "db:migrate:knowledge": "tsx src/db/migrateKnowledgeCards.ts",
+    "db:migrate:knowledge:dry-run": "tsx src/db/migrateKnowledgeCards.ts --dry-run",
     "db:init": "npm run db:migrate"
   },
   "dependencies": {

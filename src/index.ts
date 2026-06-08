@@ -4,10 +4,9 @@ import { bootstrapApp } from './bootstrap';
 import { checkDbConnection, closePool } from './db/client';
 import { getRepositoryInitMode } from './repositories';
 import { handleLineWebhook } from './routes/lineWebhook';
-import { loadKnowledgeBase } from './services/knowledgeBaseService';
+import { isKnowledgeBaseEmpty } from './services/knowledgeBaseService';
 
 loadEnv();
-loadKnowledgeBase();
 
 import express, { Request, Response } from 'express';
 
@@ -15,6 +14,16 @@ const app = express();
 
 app.get('/health', async (_req: Request, res: Response) => {
   const mode = getRepositoryInitMode();
+  let knowledgeEmpty: boolean | undefined;
+
+  try {
+    if (mode) {
+      knowledgeEmpty = await isKnowledgeBaseEmpty();
+    }
+  } catch {
+    knowledgeEmpty = undefined;
+  }
+
   if (mode === 'postgres') {
     const connected = await checkDbConnection();
     if (!connected) {
@@ -25,11 +34,21 @@ app.get('/health', async (_req: Request, res: Response) => {
       });
       return;
     }
-    res.json({ ok: true, service: 'reply-assistant', db: 'connected' });
+    res.json({
+      ok: true,
+      service: 'reply-assistant',
+      db: 'connected',
+      ...(knowledgeEmpty === true ? { knowledge_empty: true } : {}),
+    });
     return;
   }
 
-  res.json({ ok: true, service: 'reply-assistant', db: mode ?? 'memory' });
+  res.json({
+    ok: true,
+    service: 'reply-assistant',
+    db: mode ?? 'memory',
+    ...(knowledgeEmpty === true ? { knowledge_empty: true } : {}),
+  });
 });
 
 app.post('/webhook/line', express.raw({ type: '*/*' }), (req, res) => {

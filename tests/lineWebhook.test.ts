@@ -14,6 +14,7 @@ import {
 } from '../src/services/consultantWhitelist';
 import { handleServiceIntroduction } from '../src/services/servicePeriodService';
 import { processMessage } from '../src/handlers/lineWebhookHandler';
+import * as dmSessionImageService from '../src/services/dmSessionImageService';
 import { TEST_ADMIN, TEST_CONSULTANT, TEST_CUSTOMER, TEST_GROUP } from './helpers/testSetup';
 
 const SECRET = 'test-channel-secret';
@@ -148,6 +149,7 @@ describe('LINE Webhook Tests', () => {
         },
         async pushText(_userId, text) {
           resolve(text);
+          return 'mock-push-id';
         },
       });
     });
@@ -156,7 +158,7 @@ describe('LINE Webhook Tests', () => {
       {
         type: 'message',
         source: { type: 'user', userId: TEST_ADMIN },
-        message: { type: 'text', text: '整理知識卡：測試登入卡' },
+        message: { type: 'text', text: '整理知識卡：店家遇到登入不了' },
         replyToken: 'reply-token-private-ai',
       },
     ]);
@@ -168,6 +170,81 @@ describe('LINE Webhook Tests', () => {
       .send(body)
       .expect(200);
 
-    await expect(pushed).resolves.toContain('【可直接貼入 JSON 的單卡草稿】');
+    await expect(pushed).resolves.toContain('【草稿內容】');
+  });
+
+  it('routes private image event to handlePrivateImageMessage in background', async () => {
+    await registerAdmin(TEST_ADMIN);
+    const handlerSpy = jest
+      .spyOn(dmSessionImageService, 'handlePrivateImageMessage')
+      .mockResolvedValue([{ type: 'push', userId: TEST_ADMIN, text: 'mock vision draft reply' }]);
+
+    const pushed = new Promise<string>((resolve) => {
+      setLineMessageClient({
+        async replyText() {
+          throw new Error('private image should not use replyMessage');
+        },
+        async pushText(_userId, text) {
+          resolve(text);
+          return 'mock-push-image-id';
+        },
+      });
+    });
+
+    const body = buildWebhookBody([
+      {
+        type: 'message',
+        source: { type: 'user', userId: TEST_ADMIN },
+        message: { type: 'image', id: 'private-image-msg-001' },
+        replyToken: 'reply-token-private-image',
+      },
+    ]);
+
+    await request(app)
+      .post('/webhook/line')
+      .set('Content-Type', 'application/json')
+      .set('x-line-signature', sign(body))
+      .send(body)
+      .expect(200);
+
+    await expect(pushed).resolves.toBe('mock vision draft reply');
+    expect(handlerSpy).toHaveBeenCalledWith({
+      userId: TEST_ADMIN,
+      messageId: 'private-image-msg-001',
+    });
+    handlerSpy.mockRestore();
+  });
+
+  it('does not route group image event to screenshot vision flow', async () => {
+    const handlerSpy = jest.spyOn(dmSessionImageService, 'handlePrivateImageMessage');
+    let repliedText = '';
+    setLineMessageClient({
+      async replyText(_token, text) {
+        repliedText = text;
+      },
+      async pushText() {
+        throw new Error('group image should not push');
+      },
+    });
+
+    const body = buildWebhookBody([
+      {
+        type: 'message',
+        source: { type: 'group', userId: TEST_CONSULTANT, groupId: TEST_GROUP },
+        message: { type: 'image', id: 'group-image-msg-001' },
+        replyToken: 'reply-token-group-image',
+      },
+    ]);
+
+    await request(app)
+      .post('/webhook/line')
+      .set('Content-Type', 'application/json')
+      .set('x-line-signature', sign(body))
+      .send(body)
+      .expect(200);
+
+    expect(handlerSpy).not.toHaveBeenCalled();
+    expect(repliedText).toMatch(/請用文字描述問題/);
+    handlerSpy.mockRestore();
   });
 });

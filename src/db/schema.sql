@@ -112,9 +112,39 @@ CREATE TABLE IF NOT EXISTS consultants (
   approved_by TEXT,
   approved_at TIMESTAMPTZ,
   disabled_at TIMESTAMPTZ,
+  last_knowledge_export_at TIMESTAMPTZ,
   CONSTRAINT consultants_role_check CHECK (role IN ('admin', 'consultant')),
   CONSTRAINT consultants_status_check CHECK (status IN ('pending', 'active', 'disabled'))
 );
+
+ALTER TABLE consultants ADD COLUMN IF NOT EXISTS last_knowledge_export_at TIMESTAMPTZ;
+
+CREATE TABLE IF NOT EXISTS knowledge_cards (
+  card_id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  patterns TEXT[] NOT NULL,
+  risk_level TEXT NOT NULL,
+  can_public_reply BOOLEAN NOT NULL,
+  standard_answer TEXT NOT NULL,
+  not_applicable TEXT[],
+  escalate_to_consultant TEXT[],
+  status TEXT NOT NULL,
+  created_by TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_by TEXT,
+  updated_at TIMESTAMPTZ,
+  confirmed_by TEXT NOT NULL,
+  confirmed_at TIMESTAMPTZ NOT NULL,
+  CONSTRAINT knowledge_cards_risk_level_check CHECK (
+    risk_level IN ('low', 'mid', 'high', 'unknown')
+  ),
+  CONSTRAINT knowledge_cards_status_check CHECK (
+    status IN ('active', 'paused')
+  )
+);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_cards_status ON knowledge_cards(status);
+CREATE INDEX IF NOT EXISTS idx_knowledge_cards_risk_level ON knowledge_cards(risk_level);
 
 CREATE TABLE IF NOT EXISTS invite_codes (
   code TEXT PRIMARY KEY,
@@ -160,3 +190,43 @@ CREATE TABLE IF NOT EXISTS pending_handoffs (
 CREATE INDEX IF NOT EXISTS idx_pending_handoffs_consultant ON pending_handoffs(consultant_id);
 CREATE INDEX IF NOT EXISTS idx_pending_handoffs_short_code ON pending_handoffs(short_code);
 CREATE INDEX IF NOT EXISTS idx_pending_handoffs_group ON pending_handoffs(group_id);
+
+-- pending_knowledge_reviews：僅用於顧問送審 → admin 審核，不得作其他用途
+CREATE TABLE IF NOT EXISTS pending_knowledge_reviews (
+  review_id TEXT PRIMARY KEY,
+  card_data JSONB NOT NULL,
+  submitted_by TEXT NOT NULL,
+  submitted_at TIMESTAMPTZ NOT NULL,
+  status TEXT NOT NULL,
+  bot_message_id TEXT,
+  admin_response TEXT,
+  resolved_at TIMESTAMPTZ,
+  resolved_by TEXT,
+  CONSTRAINT pending_knowledge_reviews_status_check CHECK (
+    status IN ('pending', 'approved', 'rejected', 'expired')
+  )
+);
+
+CREATE INDEX IF NOT EXISTS idx_pending_knowledge_reviews_status ON pending_knowledge_reviews(status);
+CREATE INDEX IF NOT EXISTS idx_pending_knowledge_reviews_bot_message_id ON pending_knowledge_reviews(bot_message_id);
+
+-- dm_sessions：僅用於私訊草稿暫存，不是正式知識庫、不是待審區
+CREATE TABLE IF NOT EXISTS dm_sessions (
+  session_id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  session_type TEXT NOT NULL,
+  status TEXT NOT NULL,
+  draft_data JSONB,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL,
+  expired_at TIMESTAMPTZ,
+  CONSTRAINT dm_sessions_session_type_check CHECK (session_type IN ('knowledge_draft')),
+  CONSTRAINT dm_sessions_status_check CHECK (
+    status IN ('active', 'submitted', 'completed', 'cancelled', 'expired')
+  )
+);
+
+CREATE INDEX IF NOT EXISTS idx_dm_sessions_user_id ON dm_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_dm_sessions_status ON dm_sessions(status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dm_sessions_one_active_per_user
+  ON dm_sessions(user_id) WHERE status = 'active';

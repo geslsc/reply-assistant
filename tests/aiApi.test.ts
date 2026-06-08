@@ -7,6 +7,7 @@ import {
   getLlmClient,
   setLlmClient,
 } from '../src/services/knowledgeCardDraftService';
+import { handleDmSessionPrivateMessage } from '../src/services/dmSessionService';
 import { handleConsultantNaturalLanguage } from '../src/services/consultantActionService';
 import { executeReplyToGroup } from '../src/services/replyToGroupService';
 import { summarizeCustomerQuestionForConsultant } from '../src/services/consultantPrivateAiService';
@@ -46,7 +47,7 @@ describe('AI API Conservative Integration', () => {
   it('returns disabled message when consultant requests draft without API key', async () => {
     const result = await generateKnowledgeCardDraft({
       operation: 'create',
-      consultantRequest: '整理登入知識卡',
+      consultantRequest: '整理知識卡：店家遇到登入不了',
     });
     const text = formatDraftReply(result);
     expect(text).toContain('AI 草稿整理尚未啟用');
@@ -77,13 +78,12 @@ describe('AI API Conservative Integration', () => {
     setLlmClient({ complete });
 
     await registerAdmin(TEST_ADMIN);
-    const replies = await handleConsultantNaturalLanguage({
+    const replies = await handleDmSessionPrivateMessage({
       userId: TEST_ADMIN,
-      text: '整理知識卡：測試問題',
-      isGroup: false,
+      text: '整理知識卡：店家遇到登入問題',
     });
     expect(complete).toHaveBeenCalled();
-    expect(replies?.[0].text).toContain('【可直接貼入 JSON 的單卡草稿】');
+    expect(replies?.[0].text).toContain('【草稿內容】');
   });
 
   it('does not call LLM in group public answer flow', async () => {

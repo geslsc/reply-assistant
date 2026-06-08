@@ -4,6 +4,7 @@ import { getEnv } from '../config/env';
 import { logger } from '../config/logger';
 import { processMessage, IncomingMessage } from '../handlers/lineWebhookHandler';
 import { deliverBotReplies } from '../services/lineMessageService';
+import { handlePrivateImageMessage } from '../services/dmSessionImageService';
 import {
   classifyConsultantIntent,
   isConsultantPrivateAiIntent,
@@ -18,7 +19,9 @@ interface LineWebhookEvent {
   };
   message?: {
     type: string;
+    id?: string;
     text?: string;
+    quotedMessageId?: string;
   };
   replyToken?: string;
   timestamp?: number;
@@ -27,6 +30,16 @@ interface LineWebhookEvent {
 interface LineWebhookBody {
   events: LineWebhookEvent[];
 }
+
+export interface IncomingImageMessage {
+  kind: 'image';
+  userId: string;
+  messageId: string;
+  isGroup: boolean;
+  replyToken?: string;
+}
+
+export type MappedLineEvent = IncomingMessage | IncomingImageMessage | 'non_text' | null;
 
 export function validateLineSignature(body: Buffer, signature: string | undefined): boolean {
   const secret = getEnv().LINE_CHANNEL_SECRET;
@@ -40,7 +53,13 @@ export function validateLineSignature(body: Buffer, signature: string | undefine
   return digest === signature;
 }
 
-function mapLineEvent(event: LineWebhookEvent): IncomingMessage | 'non_text' | null {
+function isIncomingImageMessage(
+  mapped: IncomingMessage | IncomingImageMessage
+): mapped is IncomingImageMessage {
+  return 'kind' in mapped && mapped.kind === 'image';
+}
+
+export function mapLineEvent(event: LineWebhookEvent): MappedLineEvent {
   if (event.type !== 'message') {
     return null;
   }
@@ -48,9 +67,24 @@ function mapLineEvent(event: LineWebhookEvent): IncomingMessage | 'non_text' | n
   if (!userId) {
     return null;
   }
+
+  if (event.message?.type === 'image') {
+    if (!event.message.id) {
+      return 'non_text';
+    }
+    return {
+      kind: 'image',
+      userId,
+      messageId: event.message.id,
+      isGroup: event.source.type === 'group',
+      replyToken: event.replyToken,
+    };
+  }
+
   if (event.message?.type !== 'text') {
     return 'non_text';
   }
+
   return {
     userId,
     groupId: event.source.groupId,
@@ -58,6 +92,7 @@ function mapLineEvent(event: LineWebhookEvent): IncomingMessage | 'non_text' | n
     isGroup: event.source.type === 'group',
     isBotMentioned: false,
     replyToken: event.replyToken,
+    quotedMessageId: event.message.quotedMessageId,
     timestamp: event.timestamp ? String(event.timestamp) : undefined,
     sourceType: event.source.type === 'group' ? 'group' : 'user',
   };
@@ -71,9 +106,23 @@ function shouldHandleInBackground(message: IncomingMessage): boolean {
   return isConsultantPrivateAiIntent(intent);
 }
 
+function shouldHandleImageInBackground(message: IncomingImageMessage): boolean {
+  return !message.isGroup;
+}
+
 async function processAndPush(message: IncomingMessage): Promise<void> {
   const result = await processMessage(message);
   await deliverBotReplies(result.replies, undefined);
+}
+
+async function processImageAndPush(message: IncomingImageMessage): Promise<void> {
+  const replies = await handlePrivateImageMessage({
+    userId: message.userId,
+    messageId: message.messageId,
+  });
+  if (replies.length > 0) {
+    await deliverBotReplies(replies, undefined);
+  }
 }
 
 export async function handleLineWebhook(req: Request, res: Response): Promise<void> {
@@ -99,6 +148,7 @@ export async function handleLineWebhook(req: Request, res: Response): Promise<vo
       if (mapped === null) {
         continue;
       }
+
       if (mapped === 'non_text') {
         if (event.replyToken) {
           await deliverBotReplies(
@@ -109,24 +159,60 @@ export async function handleLineWebhook(req: Request, res: Response): Promise<vo
         continue;
       }
 
+      if (isIncomingImageMessage(mapped)) {
+        if (mapped.isGroup) {
+          if (mapped.replyToken) {
+            await deliverBotReplies(
+              [{ type: 'group', text: '請用文字描述問題,顧問比較好協助喔。' }],
+              mapped.replyToken
+            );
+          }
+          continue;
+        }
+
+        logger.info('LINE private image message received', {
+          userId: mapped.userId,
+          messageId: mapped.messageId,
+        });
+
+        if (shouldHandleImageInBackground(mapped)) {
+          void processImageAndPush(mapped).catch((error) => {
+            logger.error('Background LINE image assist failed', {
+              error: error instanceof Error ? error.message : String(error),
+              userId: mapped.userId,
+            });
+          });
+          continue;
+        }
+
+        const replies = await handlePrivateImageMessage({
+          userId: mapped.userId,
+          messageId: mapped.messageId,
+        });
+        await deliverBotReplies(replies, mapped.replyToken);
+        continue;
+      }
+
+      const textMessage: IncomingMessage = mapped;
+
       logger.info('LINE message event', {
-        userId: mapped.userId,
-        groupId: mapped.groupId,
-        sourceType: mapped.sourceType,
+        userId: textMessage.userId,
+        groupId: textMessage.groupId,
+        sourceType: textMessage.sourceType,
       });
 
-      if (shouldHandleInBackground(mapped)) {
-        void processAndPush(mapped).catch((error) => {
+      if (shouldHandleInBackground(textMessage)) {
+        void processAndPush(textMessage).catch((error) => {
           logger.error('Background LINE AI assist failed', {
             error: error instanceof Error ? error.message : String(error),
-            userId: mapped.userId,
+            userId: textMessage.userId,
           });
         });
         continue;
       }
 
-      const result = await processMessage(mapped);
-      await deliverBotReplies(result.replies, mapped.replyToken);
+      const result = await processMessage(textMessage);
+      await deliverBotReplies(result.replies, textMessage.replyToken);
     }
     res.status(200).json({ ok: true });
   } catch (error) {

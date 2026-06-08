@@ -91,6 +91,22 @@ export async function generateKnowledgeCardDraft(params: {
     };
   }
 
+  if (operation === 'create') {
+    const payload = extractOrganizePayloadFromText(consultantRequest);
+    if (!hasMinimumDraftInput(payload)) {
+      return {
+        kind: 'single_card',
+        operation,
+        validation: {
+          valid: false,
+          errors: [{ field: '_input', message: INSUFFICIENT_DRAFT_INPUT_MESSAGE }],
+        },
+        draftJson: null,
+        reasonText: updatedReason ?? null,
+      };
+    }
+  }
+
   const client = getLlmClient();
   if (!client) {
     return {
@@ -150,30 +166,144 @@ export async function generateKnowledgeCardDraft(params: {
 }
 
 /** 格式化草稿回覆文字；修改原因只寫在文字，不進 JSON */
+export function formatHumanReadableKnowledgeCard(card: KnowledgeCard): string {
+  return [
+    `標題：${card.title}`,
+    `card_id：${card.card_id}`,
+    `patterns：${card.patterns.join('、') || '（無）'}`,
+    `risk_level：${card.risk_level}`,
+    `can_public_reply：${card.can_public_reply ? '是' : '否'}`,
+    `standard_answer：${card.standard_answer}`,
+    card.not_applicable.length > 0 ? `not_applicable：${card.not_applicable.join('、')}` : '',
+    card.escalate_to_consultant.length > 0
+      ? `escalate_to_consultant：${card.escalate_to_consultant.join('、')}`
+      : '',
+    `status：${card.status}`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+export function formatDraftJson(card: KnowledgeCard): string {
+  return JSON.stringify(card, null, 2);
+}
+
+export function extractOrganizePayloadFromText(text: string): string {
+  return text
+    .replace(/^整理知識卡[:：]\s*/u, '')
+    .replace(/^幫我整理知識卡[:：]\s*/u, '')
+    .trim();
+}
+
+export const INSUFFICIENT_DRAFT_INPUT_MESSAGE =
+  '目前內容還不夠明確，請至少補充店家遇到的問題，或您建議的解法。';
+
+const PROBLEM_CLUE_PATTERNS: RegExp[] = [
+  /店家問/u,
+  /客人遇到/u,
+  /顧客遇到/u,
+  /登入不了/u,
+  /無法操作/u,
+  /發票開錯/u,
+  /權限不對/u,
+  /帳務異常/u,
+  /資料不見/u,
+  /無法/u,
+  /不能/u,
+  /不了/u,
+  /失敗/u,
+  /錯誤/u,
+  /異常/u,
+  /不對/u,
+  /不見/u,
+  /[？?]/u,
+  /嗎/u,
+  /問題/u,
+  /怎麼/u,
+  /如何/u,
+  /為什麼/u,
+  /遇到/u,
+];
+
+const SOLUTION_CLUE_PATTERNS: RegExp[] = [
+  /建議/u,
+  /請他/u,
+  /請其/u,
+  /回覆/u,
+  /操作方式/u,
+  /先確認/u,
+  /到後台/u,
+  /聯絡顧問/u,
+  /操作步驟/u,
+  /步驟/u,
+  /做法/u,
+  /回答/u,
+  /告知/u,
+  /指引/u,
+  /請店家/u,
+  /可以請/u,
+];
+
+export function hasProblemClue(text: string): boolean {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) {
+    return false;
+  }
+  return PROBLEM_CLUE_PATTERNS.some((pattern) => pattern.test(trimmed));
+}
+
+export function hasSolutionClue(text: string): boolean {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) {
+    return false;
+  }
+  return SOLUTION_CLUE_PATTERNS.some((pattern) => pattern.test(trimmed));
+}
+
+export function hasMinimumDraftInput(text: string): boolean {
+  const trimmed = text.trim();
+  if (trimmed.length < 2) {
+    return false;
+  }
+  return hasProblemClue(trimmed) || hasSolutionClue(trimmed);
+}
+
+/** 格式化草稿回覆文字；修改原因只寫在文字，不進 JSON */
 export function formatDraftReply(result: KnowledgeDraftResult): string {
   if (result.kind === 'suggestion_only') {
     return result.text;
   }
 
-  const lines: string[] = ['【知識卡草稿】', '※ 草稿不會自動生效，請人工貼入 knowledge_items.json 後 commit。'];
+  const lines: string[] = [
+    '【知識卡草稿】',
+    '※ 草稿不會自動生效。',
+    '顧問請回覆「確認送出」送 admin 審核；admin 自己整理可直接回覆「確認更新」。',
+  ];
 
   if (result.reasonText) {
     lines.push('', `【修改原因】${result.reasonText}`);
   }
 
-  if (!result.validation.valid || !result.draftJson) {
+  if (!result.validation.valid || !result.validation.normalized) {
     lines.push('', '【驗證失敗】');
     const llmDisabled = result.validation.errors.some((e) => e.field === '_llm');
+    const inputInsufficient = result.validation.errors.some((e) => e.field === '_input');
     if (llmDisabled) {
       lines.push('AI 草稿整理尚未啟用');
     }
+    if (inputInsufficient) {
+      lines.push(INSUFFICIENT_DRAFT_INPUT_MESSAGE);
+    }
     for (const err of result.validation.errors) {
+      if (err.field === '_input') {
+        continue;
+      }
       lines.push(`- ${err.field}: ${err.message}`);
     }
     return lines.join('\n');
   }
 
-  lines.push('', '【可直接貼入 JSON 的單卡草稿】', result.draftJson);
+  lines.push('', '【草稿內容】', formatHumanReadableKnowledgeCard(result.validation.normalized));
   return lines.join('\n');
 }
 

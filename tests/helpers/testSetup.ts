@@ -1,13 +1,21 @@
-import { loadKnowledgeBase } from '../../src/services/knowledgeBaseService';
+import { initKnowledgeBase } from '../../src/services/knowledgeBaseService';
 import { resetRepositories } from '../../src/repositories';
 import { clearAllPendingConfirmations } from '../../src/services/consultantConfirmationService';
 import { setLlmClient } from '../../src/services/knowledgeCardDraftService';
+import { setVisionClient } from '../../src/services/screenshotVisionService';
+import { setLineImageContentClient } from '../../src/services/lineImageContentService';
+import { clearKnowledgeCardWriteState } from '../../src/services/knowledgeCardWriteService';
+import { clearBulkImportState } from '../../src/services/knowledgeCardImportService';
 
 export async function resetTestState(): Promise<void> {
   await resetRepositories('memory');
-  loadKnowledgeBase();
   clearAllPendingConfirmations();
+  clearKnowledgeCardWriteState();
+  clearBulkImportState();
   setLlmClient(null);
+  setVisionClient(null);
+  setLineImageContentClient(null);
+  await initKnowledgeBase();
 }
 
 export const TEST_GROUP = 'group-test-001';

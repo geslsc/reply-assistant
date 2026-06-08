@@ -14,6 +14,7 @@ import {
   approveConsultant,
   getActiveAdmins,
   getActiveConsultants,
+  isActiveAdmin,
   isActiveConsultantOrAdmin,
   requestConsultantJoin,
 } from '../services/consultantWhitelist';
@@ -29,6 +30,12 @@ import {
   setWaitingFlag,
 } from '../services/groupFlags';
 import { pauseLastReferencedCard } from '../services/knowledgeBaseService';
+import { handleKnowledgeCardCommand } from '../services/knowledgeCardCommandService';
+import {
+  expireStaleSessionIfNeeded,
+  handleDmSessionPrivateMessage,
+} from '../services/dmSessionService';
+import { appendBackupReminderIfNeeded } from '../services/knowledgeCardBackupReminderService';
 import { handleConsultantNaturalLanguage } from '../services/consultantActionService';
 import {
   ACTIVE_PRIVATE_FALLBACK_HINT,
@@ -36,6 +43,15 @@ import {
   buildInactiveWorkflowBlockReply,
   isIdentityQueryPhrase,
 } from '../services/consultantIdentityService';
+import {
+  handlePrivateUsageGuide,
+  handleGroupUsageGuide,
+  isUsageGuideRequest,
+} from '../services/knowledgeCardUsageGuideHandler';
+import {
+  consumePrivateFallbackHint,
+  SIMPLIFIED_PRIVATE_FALLBACK_HINT,
+} from '../services/privateFallbackHintService';
 import { handleConsultantMute } from '../services/consultantGroupControlService';
 import { isNannyPeriodPhrase } from '../services/consultantIntentClassifier';
 import { buildOfficialCsAnswer } from '../services/officialCsService';
@@ -74,6 +90,7 @@ export interface IncomingMessage {
   isGroup: boolean;
   isBotMentioned?: boolean;
   replyToken?: string;
+  quotedMessageId?: string;
   timestamp?: string;
   sourceType?: 'group' | 'user';
 }
@@ -378,12 +395,51 @@ async function handlePrivateMessage(message: IncomingMessage): Promise<BotReply[
   const isActive = await isActiveConsultantOrAdmin(message.userId);
 
   if (isActive) {
+    if (isUsageGuideRequest(text)) {
+      return handlePrivateUsageGuide(message.userId);
+    }
+
+    const expiredReplies = await expireStaleSessionIfNeeded(message.userId);
+    if (expiredReplies) {
+      if (await isActiveAdmin(message.userId)) {
+        await appendBackupReminderIfNeeded(message.userId, expiredReplies);
+      }
+      return expiredReplies;
+    }
+
+    const dmSessionReplies = await handleDmSessionPrivateMessage({
+      userId: message.userId,
+      text,
+      quotedMessageId: message.quotedMessageId,
+    });
+    if (dmSessionReplies) {
+      if (await isActiveAdmin(message.userId)) {
+        await appendBackupReminderIfNeeded(message.userId, dmSessionReplies);
+      }
+      return dmSessionReplies;
+    }
+
+    const knowledgeReplies = await handleKnowledgeCardCommand({
+      userId: message.userId,
+      text,
+      quotedMessageId: message.quotedMessageId,
+    });
+    if (knowledgeReplies) {
+      if (await isActiveAdmin(message.userId)) {
+        await appendBackupReminderIfNeeded(message.userId, knowledgeReplies);
+      }
+      return knowledgeReplies;
+    }
+
     const naturalReplies = await handleConsultantNaturalLanguage({
       userId: message.userId,
       text,
       isGroup: false,
     });
     if (naturalReplies) {
+      if (await isActiveAdmin(message.userId)) {
+        await appendBackupReminderIfNeeded(message.userId, naturalReplies);
+      }
       return naturalReplies;
     }
 
@@ -393,15 +449,33 @@ async function handlePrivateMessage(message: IncomingMessage): Promise<BotReply[
         userId: message.userId,
         text: await buildIdentityReply(message.userId),
       });
+      if (await isActiveAdmin(message.userId)) {
+        await appendBackupReminderIfNeeded(message.userId, replies);
+      }
       return replies;
     }
 
-    replies.push({
-      type: 'push',
-      userId: message.userId,
-      text: ACTIVE_PRIVATE_FALLBACK_HINT,
-    });
-    return replies;
+    if (consumePrivateFallbackHint(message.userId)) {
+      replies.push({
+        type: 'push',
+        userId: message.userId,
+        text: SIMPLIFIED_PRIVATE_FALLBACK_HINT,
+      });
+    }
+    if (await isActiveAdmin(message.userId)) {
+      await appendBackupReminderIfNeeded(message.userId, replies);
+    }
+    return replies.length > 0 ? replies : [];
+  }
+
+  if (isUsageGuideRequest(text)) {
+    return [
+      {
+        type: 'push',
+        userId: message.userId,
+        text: await buildIdentityReply(message.userId),
+      },
+    ];
   }
 
   if (isIdentityQueryPhrase(text)) {
@@ -441,6 +515,11 @@ export async function processMessage(message: IncomingMessage): Promise<ProcessR
   const isConsultant = await isActiveConsultantOrAdmin(message.userId);
 
   if (isConsultant) {
+    if (isUsageGuideRequest(text)) {
+      replies.push(...handleGroupUsageGuide());
+      return { replies, events: await getEventLogs() };
+    }
+
     if (text === '小助手先休息') {
       replies.push(...(await handleConsultantMute(groupId, message.userId, true)));
       return { replies, events: await getEventLogs() };

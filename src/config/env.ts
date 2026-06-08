@@ -15,6 +15,9 @@ export interface AppEnv {
   LOG_LEVEL: string;
   USE_MEMORY_REPOS: boolean;
   OPENAI_API_KEY: string | null;
+  OPENAI_VISION_MODEL: string;
+  KNOWLEDGE_EXPORT_REMINDER_DAYS: number;
+  DM_SESSION_TIMEOUT_HOURS: number;
 }
 
 let cachedEnv: AppEnv | null = null;
@@ -51,6 +54,13 @@ export function loadEnv(overrides: Partial<AppEnv> = {}): AppEnv {
       overrides.USE_MEMORY_REPOS ??
       (process.env.USE_MEMORY_REPOS === 'true' || process.env.NODE_ENV === 'test'),
     OPENAI_API_KEY: overrides.OPENAI_API_KEY ?? process.env.OPENAI_API_KEY ?? null,
+    OPENAI_VISION_MODEL:
+      overrides.OPENAI_VISION_MODEL ?? process.env.OPENAI_VISION_MODEL ?? 'gpt-4o',
+    KNOWLEDGE_EXPORT_REMINDER_DAYS:
+      overrides.KNOWLEDGE_EXPORT_REMINDER_DAYS ??
+      Number(process.env.KNOWLEDGE_EXPORT_REMINDER_DAYS ?? 7),
+    DM_SESSION_TIMEOUT_HOURS:
+      overrides.DM_SESSION_TIMEOUT_HOURS ?? Number(process.env.DM_SESSION_TIMEOUT_HOURS ?? 24),
   };
   return cachedEnv;
 }

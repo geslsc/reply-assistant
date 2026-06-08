@@ -44,8 +44,9 @@ git push -u origin main
 | `ADMIN_LINE_USER_IDS` | （步驟 13 填入你的 userId） |
 | `CONSULTANT_INVITE_CODE` | （選填，顧問加入用） |
 | `OPENAI_API_KEY` | **選填**。僅顧問私訊 AI 草稿／摘要；未設定不影響啟動 |
+| `KNOWLEDGE_EXPORT_REMINDER_DAYS` | admin 被動備份提醒天數，預設 `7` |
 
-**注意：** `npm run db:migrate` 只讀 `DATABASE_URL`，不讀 `TEST_DATABASE_URL`。部署 schema 更新（含 `pending_handoffs`）後務必執行 migration。
+**注意：** `npm run db:migrate` 只讀 `DATABASE_URL`，不讀 `TEST_DATABASE_URL`。部署 schema 更新（含 `knowledge_cards`、`pending_handoffs`）後務必執行 migration。
 
 ### 4. 執行 Migration
 
@@ -53,7 +54,16 @@ Railway Web Service → **Shell**（或 one-off command）：
 
 ```bash
 npm run db:migrate
+npm run db:migrate:knowledge:dry-run
+npm run db:migrate:knowledge
 ```
+
+部署後確認：
+
+- `GET /health` 正常
+- DB `knowledge_cards` 卡數 = `knowledge_items.json` 卡數
+- 群組 low risk 公開回答仍正常（來源已改 DB）
+- `knowledge_items.json` 保留未刪
 
 ### 5. 驗證 Health
 

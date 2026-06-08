@@ -25,6 +25,9 @@ import {
   Repositories,
 } from './interfaces';
 import { createPostgresPendingHandoffRepository } from './postgresPendingHandoffRepository';
+import { createPostgresPendingKnowledgeReviewRepository } from './postgresPendingKnowledgeReviewRepository';
+import { createPostgresDmSessionRepository } from './postgresDmSessionRepository';
+import { createPostgresKnowledgeCardRepository } from './postgresKnowledgeCardRepository';
 import {
   mapConsultantRow,
   mapGroupRow,
@@ -379,6 +382,17 @@ function createConsultantRepository(pool: Pool): ConsultantRepository {
       );
       return result.rows.map(mapConsultantRow);
     },
+    async setLastKnowledgeExportAt(userId, exportedAt) {
+      await pool.query(
+        `UPDATE consultants SET last_knowledge_export_at = $2, updated_at = NOW()
+         WHERE line_user_id = $1`,
+        [userId, exportedAt]
+      );
+    },
+    async getLastKnowledgeExportAt(userId) {
+      const record = await this.findById(userId);
+      return record?.lastKnowledgeExportAt ?? null;
+    },
     async clear() {
       await pool.query('DELETE FROM consultants');
       await pool.query('DELETE FROM invite_codes');
@@ -427,6 +441,9 @@ export function createPostgresRepositories(pool: Pool = getPool()): Repositories
     events: createEventLogRepository(pool),
     consultants: createConsultantRepository(pool),
     knowledgeOverrides: createKnowledgeOverrideRepository(pool),
+    knowledgeCards: createPostgresKnowledgeCardRepository(pool),
     pendingHandoffs: createPostgresPendingHandoffRepository(pool),
+    pendingKnowledgeReviews: createPostgresPendingKnowledgeReviewRepository(pool),
+    dmSessions: createPostgresDmSessionRepository(pool),
   };
 }
