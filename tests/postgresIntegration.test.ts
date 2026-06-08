@@ -183,7 +183,7 @@ describePg('PostgreSQL Integration Tests', () => {
     await initRepositories('postgres');
     await pauseCard('op-login', 'admin-001', 'test');
     const match = await matchKnowledgeCard('怎麼登入後台');
-    expect(match.card?.id).not.toBe('op-login');
+    expect(match.card?.card_id).not.toBe('op-login');
   });
 
   it('batch stale settles multiple threads in same group', async () => {

@@ -130,3 +130,33 @@ CREATE TABLE IF NOT EXISTS knowledge_overrides (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CONSTRAINT knowledge_overrides_status_check CHECK (status_override IN ('暫停'))
 );
+
+-- pending_handoffs：僅用於私訊代回群組流程，不得作知識卡草稿儲存區
+CREATE TABLE IF NOT EXISTS pending_handoffs (
+  id TEXT PRIMARY KEY,
+  consultant_id TEXT NOT NULL,
+  issue_thread_id TEXT NOT NULL,
+  group_id TEXT NOT NULL,
+  short_code TEXT NOT NULL,
+  status TEXT NOT NULL,
+  invalid_reason TEXT,
+  customer_question TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  closed_at TIMESTAMPTZ,
+  CONSTRAINT pending_handoffs_status_check CHECK (
+    status IN ('open', 'closed', 'invalid')
+  ),
+  CONSTRAINT pending_handoffs_invalid_reason_check CHECK (
+    invalid_reason IS NULL OR invalid_reason IN (
+      'passive_timeout',
+      'group_muted',
+      'service_ended',
+      'out_of_service'
+    )
+  )
+);
+
+CREATE INDEX IF NOT EXISTS idx_pending_handoffs_consultant ON pending_handoffs(consultant_id);
+CREATE INDEX IF NOT EXISTS idx_pending_handoffs_short_code ON pending_handoffs(short_code);
+CREATE INDEX IF NOT EXISTS idx_pending_handoffs_group ON pending_handoffs(group_id);

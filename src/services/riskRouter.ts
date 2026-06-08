@@ -1,9 +1,9 @@
 import {
-  KnowledgeItem,
   PUBLIC_REPLY_SUFFIX,
   RiskLevel,
   RouteAction,
 } from '../types';
+import { KnowledgeCard } from '../schemas/knowledgeCardSchema';
 import { isOfficialCsCard, matchKnowledgeCard } from './knowledgeBaseService';
 
 const CLARIFY_PROMPT =
@@ -50,7 +50,7 @@ export async function routeQuestion(
   return routeByRisk(card, question);
 }
 
-export function routeByRisk(card: KnowledgeItem, question: string): RouteAction {
+export function routeByRisk(card: KnowledgeCard, question: string): RouteAction {
   switch (card.risk_level) {
     case RiskLevel.LOW:
       if (card.can_public_reply) {

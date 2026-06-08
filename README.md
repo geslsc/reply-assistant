@@ -44,6 +44,7 @@ npm start
 | `CONSULTANT_INVITE_CODE` | 顧問加入邀請碼 |
 | `OFFICIAL_CS_*` | 官方客服導流資訊（覆蓋 JSON placeholder） |
 | `LOG_LEVEL` | `debug` / `info` / `warn` / `error` |
+| `OPENAI_API_KEY` | **選填**。OpenAI API Key，僅用於顧問私訊 AI 草稿／摘要輔助；未設定時系統仍可啟動，AI 草稿整理不可用 |
 
 ## PostgreSQL 初始化
 
@@ -145,8 +146,16 @@ Admin 私訊核准：
 npm run db:migrate
 ```
 
+`npm run db:migrate` 會套用 `pending_handoffs` 等 schema 更新；部署後務必執行。
+
 7. 確認 `GET /health` 回 `{ "ok": true, "db": "connected" }`
 8. 再設定 LINE Developer Console Webhook URL
+
+### OPENAI_API_KEY（選填）
+
+- 未設定時 production 仍可正常啟動
+- 未設定時，顧問私訊要求知識卡草稿整理會回覆「AI 草稿整理尚未啟用」
+- 僅注入顧問私訊草稿流程，**不會**進入群組公開回答或 REPLY_TO_GROUP 代回流程
 
 ## 測試
 

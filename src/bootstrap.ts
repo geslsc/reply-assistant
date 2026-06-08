@@ -1,6 +1,7 @@
 import { getEnv } from './config/env';
 import { logger } from './config/logger';
 import { getRepos, initRepositories } from './repositories';
+import { initConsultantDraftAi } from './services/openaiClient';
 
 export async function bootstrapAdmins(): Promise<void> {
   const env = getEnv();
@@ -21,5 +22,6 @@ export async function bootstrapAdmins(): Promise<void> {
 
 export async function bootstrapApp(): Promise<void> {
   await initRepositories();
+  initConsultantDraftAi();
   await bootstrapAdmins();
 }

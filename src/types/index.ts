@@ -103,26 +103,26 @@ export interface ConsultantRecord {
   createdAt: string;
 }
 
-export interface KnowledgeItem {
-  id: string;
-  common_questions: string[];
-  standard_answer: string;
-  can_public_reply: boolean;
-  status: '可用' | '暫停';
-  risk_level: RiskLevel;
-}
+/** @deprecated 請改用 KnowledgeCard；保留別名供既有程式過渡 */
+export type { KnowledgeCard as KnowledgeItem } from '../schemas/knowledgeCardSchema';
+export { deriveCanPublicReply } from '../schemas/knowledgeCardSchema';
 
 export interface CardMatchResult {
-  card: KnowledgeItem | null;
+  card: import('../schemas/knowledgeCardSchema').KnowledgeCard | null;
   confidence: 'hit' | 'partial' | 'miss';
 }
 
 export type RouteAction =
-  | { type: 'public_answer'; card: KnowledgeItem }
+  | { type: 'public_answer'; card: import('../schemas/knowledgeCardSchema').KnowledgeCard }
   | { type: 'clarify'; question: string }
-  | { type: 'handoff'; card: KnowledgeItem | null; reason: string; riskLevel: RiskLevel }
+  | {
+      type: 'handoff';
+      card: import('../schemas/knowledgeCardSchema').KnowledgeCard | null;
+      reason: string;
+      riskLevel: RiskLevel;
+    }
   | { type: 'knowledge_miss'; question: string }
-  | { type: 'official_cs'; card: KnowledgeItem }
+  | { type: 'official_cs'; card: import('../schemas/knowledgeCardSchema').KnowledgeCard }
   | { type: 'no_action' };
 
 export interface BotReply {

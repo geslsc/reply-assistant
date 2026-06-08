@@ -25,6 +25,17 @@ describe('Forbidden Features Reverse Tests', () => {
     expect(joined).not.toMatch(/setInterval\(.*timeout/i);
   });
 
+  it('does not include thread_muted orphan enum or fake thread mute feature', () => {
+    const srcDir = path.join(__dirname, '../src');
+    const joined = walk(srcDir)
+      .filter((f) => f.endsWith('.ts'))
+      .map((f) => fs.readFileSync(f, 'utf-8'))
+      .join('\n');
+    expect(joined).not.toMatch(/THREAD_MUTED/);
+    expect(joined).not.toMatch(/thread_muted/);
+    expect(joined).not.toMatch(/thread_resolved/);
+  });
+
   it('still uses only 5 thread states and 10 event types', () => {
     expect(Object.values(ThreadState).length).toBe(5);
     expect(Object.values(EventType).length).toBe(10);

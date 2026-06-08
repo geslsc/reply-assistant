@@ -43,8 +43,9 @@ git push -u origin main
 | `OFFICIAL_CS_URL` 或 `OFFICIAL_CS_FORM_URL` | （選填，程式兩者皆支援） |
 | `ADMIN_LINE_USER_IDS` | （步驟 13 填入你的 userId） |
 | `CONSULTANT_INVITE_CODE` | （選填，顧問加入用） |
+| `OPENAI_API_KEY` | **選填**。僅顧問私訊 AI 草稿／摘要；未設定不影響啟動 |
 
-**注意：** `npm run db:migrate` 只讀 `DATABASE_URL`，不讀 `TEST_DATABASE_URL`。
+**注意：** `npm run db:migrate` 只讀 `DATABASE_URL`，不讀 `TEST_DATABASE_URL`。部署 schema 更新（含 `pending_handoffs`）後務必執行 migration。
 
 ### 4. 執行 Migration
 
@@ -100,6 +101,6 @@ DATABASE_URL=postgresql://... NODE_ENV=production npm start
 
 - 排程器主動推播
 - Notion 即時 API
-- LLM 自由生成答案
+- LLM 自由生成群組操作答案（`OPENAI_API_KEY` 僅限顧問私訊草稿，不進公開回答）
 - 新增狀態 / event_type
 - 多 thread 完整並行

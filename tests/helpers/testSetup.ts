@@ -1,9 +1,13 @@
 import { loadKnowledgeBase } from '../../src/services/knowledgeBaseService';
 import { resetRepositories } from '../../src/repositories';
+import { clearAllPendingConfirmations } from '../../src/services/consultantConfirmationService';
+import { setLlmClient } from '../../src/services/knowledgeCardDraftService';
 
 export async function resetTestState(): Promise<void> {
   await resetRepositories('memory');
   loadKnowledgeBase();
+  clearAllPendingConfirmations();
+  setLlmClient(null);
 }
 
 export const TEST_GROUP = 'group-test-001';

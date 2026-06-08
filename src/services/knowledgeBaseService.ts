@@ -1,9 +1,14 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { CardMatchResult, KnowledgeItem, RiskLevel } from '../types';
+import {
+  deriveCanPublicReply,
+  KnowledgeCard,
+} from '../schemas/knowledgeCardSchema';
+import { enforceKnowledgeCardRules } from './knowledgeCardValidator';
+import { CardMatchResult, RiskLevel } from '../types';
 import { getRepos } from '../repositories';
 
-let knowledgeItems: KnowledgeItem[] = [];
+let knowledgeItems: KnowledgeCard[] = [];
 let loadedFromPath: string | null = null;
 
 const DEFAULT_KNOWLEDGE_PATH = path.join(
@@ -17,15 +22,40 @@ function normalize(text: string): string {
   return text.toLowerCase().replace(/\s+/g, '').trim();
 }
 
-export function loadKnowledgeBase(filePath?: string): KnowledgeItem[] {
+/** 載入時正規化舊格式（id / common_questions）→ 新 9 欄位 */
+function normalizeLegacyCard(raw: Record<string, unknown>): KnowledgeCard {
+  const cardId = String(raw.card_id ?? raw.id ?? '');
+  const patterns = (raw.patterns ?? raw.common_questions ?? []) as string[];
+  const riskLevel = (raw.risk_level ?? RiskLevel.LOW) as RiskLevel;
+  const candidate = {
+    card_id: cardId,
+    title: String(raw.title ?? cardId),
+    patterns,
+    risk_level: riskLevel,
+    can_public_reply: deriveCanPublicReply(riskLevel),
+    standard_answer: String(raw.standard_answer ?? ''),
+    not_applicable: (raw.not_applicable ?? []) as string[],
+    escalate_to_consultant: (raw.escalate_to_consultant ?? []) as string[],
+    status: (raw.status ?? '可用') as '可用' | '暫停',
+  };
+  const validated = enforceKnowledgeCardRules(candidate);
+  if (validated.valid && validated.normalized) {
+    return validated.normalized;
+  }
+  return candidate as KnowledgeCard;
+}
+
+export function loadKnowledgeBase(filePath?: string): KnowledgeCard[] {
   const targetPath = filePath ?? DEFAULT_KNOWLEDGE_PATH;
-  const raw = fs.readFileSync(targetPath, 'utf-8');
-  knowledgeItems = JSON.parse(raw) as KnowledgeItem[];
+  const raw = JSON.parse(fs.readFileSync(targetPath, 'utf-8')) as unknown[];
+  knowledgeItems = raw.map((item) =>
+    normalizeLegacyCard(item as Record<string, unknown>)
+  );
   loadedFromPath = targetPath;
   return knowledgeItems;
 }
 
-export function getKnowledgeItems(): KnowledgeItem[] {
+export function getKnowledgeItems(): KnowledgeCard[] {
   if (knowledgeItems.length === 0) {
     loadKnowledgeBase();
   }
@@ -36,17 +66,17 @@ export function getLoadedFromPath(): string | null {
   return loadedFromPath;
 }
 
-async function getEffectiveStatus(item: KnowledgeItem): Promise<'可用' | '暫停'> {
-  const override = await getRepos().knowledgeOverrides.findByCardId(item.id);
+async function getEffectiveStatus(item: KnowledgeCard): Promise<'可用' | '暫停'> {
+  const override = await getRepos().knowledgeOverrides.findByCardId(item.card_id);
   if (override?.statusOverride === '暫停') {
     return '暫停';
   }
   return item.status;
 }
 
-export async function getActiveCards(): Promise<KnowledgeItem[]> {
+export async function getActiveCards(): Promise<KnowledgeCard[]> {
   const items = getKnowledgeItems();
-  const active: KnowledgeItem[] = [];
+  const active: KnowledgeCard[] = [];
   for (const item of items) {
     const status = await getEffectiveStatus(item);
     if (status === '可用') {
@@ -56,15 +86,15 @@ export async function getActiveCards(): Promise<KnowledgeItem[]> {
   return active;
 }
 
-export function getCardById(id: string): KnowledgeItem | undefined {
-  return getKnowledgeItems().find((item) => item.id === id);
+export function getCardById(id: string): KnowledgeCard | undefined {
+  return getKnowledgeItems().find((item) => item.card_id === id);
 }
 
 export async function pauseCard(
   cardId: string,
   updatedBy: string,
   reason?: string
-): Promise<KnowledgeItem | undefined> {
+): Promise<KnowledgeCard | undefined> {
   const card = getCardById(cardId);
   if (!card) {
     return undefined;
@@ -76,7 +106,7 @@ export async function pauseCard(
 export async function pauseLastReferencedCard(
   cardId: string | null,
   updatedBy: string
-): Promise<KnowledgeItem | undefined> {
+): Promise<KnowledgeCard | undefined> {
   if (!cardId) {
     return undefined;
   }
@@ -87,20 +117,20 @@ export async function matchKnowledgeCard(question: string): Promise<CardMatchRes
   const normalizedQ = normalize(question);
   const activeCards = await getActiveCards();
 
-  let bestCard: KnowledgeItem | null = null;
+  let bestCard: KnowledgeCard | null = null;
   let bestScore = 0;
 
   for (const card of activeCards) {
-    for (const cq of card.common_questions) {
-      const normalizedCq = normalize(cq);
-      if (normalizedQ === normalizedCq) {
+    for (const pattern of card.patterns) {
+      const normalizedPattern = normalize(pattern);
+      if (normalizedQ === normalizedPattern) {
         return { card, confidence: 'hit' };
       }
       if (
-        normalizedQ.includes(normalizedCq) ||
-        normalizedCq.includes(normalizedQ)
+        normalizedQ.includes(normalizedPattern) ||
+        normalizedPattern.includes(normalizedQ)
       ) {
-        const score = normalizedCq.length;
+        const score = normalizedPattern.length;
         if (score > bestScore) {
           bestScore = score;
           bestCard = card;
@@ -116,11 +146,11 @@ export async function matchKnowledgeCard(question: string): Promise<CardMatchRes
   return { card: null, confidence: 'miss' };
 }
 
-export function isOfficialCsCard(card: KnowledgeItem): boolean {
-  return card.id.startsWith('official-cs') || card.risk_level === RiskLevel.UNKNOWN;
+export function isOfficialCsCard(card: KnowledgeCard): boolean {
+  return card.card_id.startsWith('official-cs') || card.risk_level === RiskLevel.UNKNOWN;
 }
 
-export function resetKnowledgeBase(items: KnowledgeItem[]): void {
+export function resetKnowledgeBase(items: KnowledgeCard[]): void {
   knowledgeItems = items;
 }
 

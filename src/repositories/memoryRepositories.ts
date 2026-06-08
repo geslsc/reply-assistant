@@ -22,6 +22,7 @@ import {
   KnowledgeOverrideRepository,
   Repositories,
 } from './interfaces';
+import { createMemoryPendingHandoffRepository } from './memoryPendingHandoffRepository';
 
 const VALID_EVENT_TYPES = new Set(Object.values(EventType));
 const VALID_ACTORS = new Set(Object.values(Actor));
@@ -280,5 +281,6 @@ export function createMemoryRepositories(): Repositories {
     events: eventRepo,
     consultants: consultantRepo,
     knowledgeOverrides: overrideRepo,
+    pendingHandoffs: createMemoryPendingHandoffRepository(),
   };
 }

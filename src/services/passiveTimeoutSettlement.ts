@@ -11,6 +11,11 @@ import {
   transitionThreadState,
   updateIssueThread,
 } from './issueThreadService';
+import {
+  invalidatePendingHandoffsByGroup,
+  invalidatePendingHandoffsByThread,
+} from './pendingHandoffService';
+import { PendingHandoffInvalidReason } from '../repositories/pendingHandoffTypes';
 
 export interface SettlementResult {
   groupId: string;
@@ -79,8 +84,14 @@ export async function settleGroupTimeouts(
           toState: ThreadState.OUT_OF_SERVICE_PERIOD,
           reason: 'service_expired',
         });
+        await invalidatePendingHandoffsByThread(
+          thread.groupId,
+          thread.issueThreadId,
+          PendingHandoffInvalidReason.OUT_OF_SERVICE
+        );
       }
     }
+    await invalidatePendingHandoffsByGroup(groupId, PendingHandoffInvalidReason.SERVICE_ENDED);
   }
 
   const threads = await getThreadsByGroup(groupId);
@@ -116,6 +127,11 @@ export async function settleGroupTimeouts(
     if (toState) {
       await transitionThreadState(thread.groupId, thread.issueThreadId, toState);
       await updateIssueThread(thread.groupId, thread.issueThreadId, { clarifyRound: 0 });
+      await invalidatePendingHandoffsByThread(
+        thread.groupId,
+        thread.issueThreadId,
+        PendingHandoffInvalidReason.PASSIVE_TIMEOUT
+      );
       await logStateTransition({
         group_id: groupId,
         issue_thread_id: thread.issueThreadId,

@@ -87,4 +87,5 @@ export interface Repositories {
   events: EventLogRepository;
   consultants: ConsultantRepository;
   knowledgeOverrides: KnowledgeOverrideRepository;
+  pendingHandoffs: import('./pendingHandoffTypes').PendingHandoffRepository;
 }

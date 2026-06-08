@@ -24,6 +24,7 @@ import {
   KnowledgeOverrideRepository,
   Repositories,
 } from './interfaces';
+import { createPostgresPendingHandoffRepository } from './postgresPendingHandoffRepository';
 import {
   mapConsultantRow,
   mapGroupRow,
@@ -426,5 +427,6 @@ export function createPostgresRepositories(pool: Pool = getPool()): Repositories
     events: createEventLogRepository(pool),
     consultants: createConsultantRepository(pool),
     knowledgeOverrides: createKnowledgeOverrideRepository(pool),
+    pendingHandoffs: createPostgresPendingHandoffRepository(pool),
   };
 }

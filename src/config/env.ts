@@ -14,6 +14,7 @@ export interface AppEnv {
   OFFICIAL_CS_SERVICE_HOURS: string | null;
   LOG_LEVEL: string;
   USE_MEMORY_REPOS: boolean;
+  OPENAI_API_KEY: string | null;
 }
 
 let cachedEnv: AppEnv | null = null;
@@ -49,6 +50,7 @@ export function loadEnv(overrides: Partial<AppEnv> = {}): AppEnv {
     USE_MEMORY_REPOS:
       overrides.USE_MEMORY_REPOS ??
       (process.env.USE_MEMORY_REPOS === 'true' || process.env.NODE_ENV === 'test'),
+    OPENAI_API_KEY: overrides.OPENAI_API_KEY ?? process.env.OPENAI_API_KEY ?? null,
   };
   return cachedEnv;
 }

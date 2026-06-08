@@ -1,15 +1,14 @@
-import {
-  Actor,
-  BotReply,
-  EventType,
-  KnowledgeItem,
-  RiskLevel,
-  ThreadState,
-} from '../types';
+import { Actor, BotReply, EventType, RiskLevel, ThreadState } from '../types';
+import { KnowledgeCard } from '../schemas/knowledgeCardSchema';
 import { createEvent } from './eventLogService';
 import { getActiveConsultants } from './consultantWhitelist';
 import { transitionState } from './stateMachine';
-import { updateIssueThread } from './issueThreadService';
+import { getIssueThread, updateIssueThread } from './issueThreadService';
+import {
+  buildHandoffPrivateCard,
+  registerHandoffsForConsultants,
+} from './pendingHandoffService';
+import { deriveShortCode } from './shortCodeService';
 
 export interface HandoffDraft {
   questionSummary: string;
@@ -22,7 +21,7 @@ export interface HandoffDraft {
 
 export function buildHandoffDraft(params: {
   customerQuestion: string;
-  card: KnowledgeItem | null;
+  card: KnowledgeCard | null;
   reason: string;
   riskLevel: RiskLevel;
 }): HandoffDraft {
@@ -36,12 +35,23 @@ export function buildHandoffDraft(params: {
     suggestedChecks: card
       ? ['請確認店家描述與知識卡情境一致', '請確認是否可公開回覆']
       : ['請確認問題是否為新題型', '請補充知識卡或請店家提供更多細節'],
-    knowledgeCardId: card?.id ?? null,
+    knowledgeCardId: card?.card_id ?? null,
     riskLevel: params.riskLevel,
   };
 }
 
-export function formatHandoffMessage(draft: HandoffDraft): string {
+export function formatHandoffMessage(
+  draft: HandoffDraft,
+  options?: { groupId?: string; groupName?: string | null; shortCode?: string }
+): string {
+  if (options?.shortCode && options.groupId) {
+    return buildHandoffPrivateCard({
+      groupId: options.groupId,
+      groupName: options.groupName ?? null,
+      shortCode: options.shortCode,
+      customerQuestion: draft.questionSummary,
+    });
+  }
   return [
     '【問題收斂卡】',
     draft.questionSummary,
@@ -59,7 +69,7 @@ export async function executeHandoff(params: {
   groupId: string;
   issueThreadId: string;
   customerQuestion: string;
-  card: KnowledgeItem | null;
+  card: KnowledgeCard | null;
   reason: string;
   riskLevel: RiskLevel;
   actorUserId?: string | null;
@@ -80,7 +90,7 @@ export async function executeHandoff(params: {
   });
 
   await updateIssueThread(params.groupId, params.issueThreadId, {
-    lastKnowledgeCardId: params.card?.id ?? null,
+    lastKnowledgeCardId: params.card?.card_id ?? null,
   });
 
   await createEvent({
@@ -90,15 +100,34 @@ export async function executeHandoff(params: {
     actor: Actor.SYSTEM,
     actor_user_id: params.actorUserId ?? null,
     risk_level: params.riskLevel,
-    knowledge_card_id: params.card?.id ?? null,
+    knowledge_card_id: params.card?.card_id ?? null,
     detail: params.reason,
   });
 
   const consultants = await getActiveConsultants();
+  const thread = await getIssueThread(params.groupId, params.issueThreadId);
+  const shortCode = deriveShortCode(
+    params.issueThreadId,
+    thread?.createdAt ?? new Date().toISOString()
+  );
+
+  await registerHandoffsForConsultants({
+    groupId: params.groupId,
+    groupName: null,
+    issueThreadId: params.issueThreadId,
+    shortCode,
+    customerQuestion: params.customerQuestion,
+    consultantIds: consultants.map((c) => c.userId),
+  });
+
   const replies: BotReply[] = consultants.map((c) => ({
     type: 'push' as const,
     userId: c.userId,
-    text: formatHandoffMessage(draft),
+    text: formatHandoffMessage(draft, {
+      groupId: params.groupId,
+      groupName: null,
+      shortCode,
+    }),
   }));
 
   return { replies, draft };

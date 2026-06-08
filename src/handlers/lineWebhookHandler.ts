@@ -14,7 +14,6 @@ import {
   approveConsultant,
   getActiveAdmins,
   getActiveConsultants,
-  isActiveAdmin,
   isActiveConsultantOrAdmin,
   requestConsultantJoin,
 } from '../services/consultantWhitelist';
@@ -30,6 +29,15 @@ import {
   setWaitingFlag,
 } from '../services/groupFlags';
 import { pauseLastReferencedCard } from '../services/knowledgeBaseService';
+import { handleConsultantNaturalLanguage } from '../services/consultantActionService';
+import {
+  ACTIVE_PRIVATE_FALLBACK_HINT,
+  buildIdentityReply,
+  buildInactiveWorkflowBlockReply,
+  isIdentityQueryPhrase,
+} from '../services/consultantIdentityService';
+import { handleConsultantMute } from '../services/consultantGroupControlService';
+import { isNannyPeriodPhrase } from '../services/consultantIntentClassifier';
 import { buildOfficialCsAnswer } from '../services/officialCsService';
 import {
   createIssueThread,
@@ -105,28 +113,6 @@ async function getOrCreateActiveThread(groupId: string, question: string) {
   return thread;
 }
 
-async function handleConsultantMute(
-  groupId: string,
-  userId: string,
-  mute: boolean
-): Promise<BotReply[]> {
-  await setMute(groupId, mute);
-  await createEvent({
-    event_type: EventType.CONSULTANT_MUTE,
-    group_id: groupId,
-    issue_thread_id: null,
-    actor: Actor.CONSULTANT,
-    actor_user_id: userId,
-    detail: mute ? 'muted until consultant clears' : 'unmuted',
-  });
-  return [
-    {
-      type: 'group',
-      text: mute ? '小助手先休息中,有需要請顧問喚醒。' : '小助手回來了,有需要可以再詢問。',
-    },
-  ];
-}
-
 async function handleClosingSignal(
   groupId: string,
   userId: string,
@@ -184,7 +170,7 @@ async function handlePauseKnowledgeCard(
   if (card) {
     replies.push({
       type: 'group',
-      text: `已將知識卡「${card.id}」標記暫停,管理者將收到提醒。`,
+      text: `已將知識卡「${card.card_id}」標記暫停,管理者將收到提醒。`,
     });
     const admins = (await getActiveConsultants()).filter(
       (c) => c.role === ConsultantRole.ADMIN
@@ -193,7 +179,7 @@ async function handlePauseKnowledgeCard(
       replies.push({
         type: 'push',
         userId: admin.userId,
-        text: `【知識卡暫停】顧問 ${userId} 標記「${card.id}」需修正。`,
+        text: `【知識卡暫停】顧問 ${userId} 標記「${card.card_id}」需修正。`,
       });
     }
   } else {
@@ -259,7 +245,7 @@ async function handleCustomerQuestion(
         detail: 'low risk public answer',
       });
       await updateIssueThread(groupId, thread.issueThreadId, {
-        lastKnowledgeCardId: action.card.id,
+        lastKnowledgeCardId: action.card.card_id,
       });
       await createEvent({
         event_type: EventType.KNOWLEDGE_HIT,
@@ -267,7 +253,7 @@ async function handleCustomerQuestion(
         issue_thread_id: thread.issueThreadId,
         actor: Actor.BOT,
         risk_level: action.card.risk_level,
-        knowledge_card_id: action.card.id,
+        knowledge_card_id: action.card.card_id,
       });
       await createEvent({
         event_type: EventType.AI_ANSWER,
@@ -275,7 +261,7 @@ async function handleCustomerQuestion(
         issue_thread_id: thread.issueThreadId,
         actor: Actor.BOT,
         risk_level: action.card.risk_level,
-        knowledge_card_id: action.card.id,
+        knowledge_card_id: action.card.card_id,
         detail: answer,
       });
       return [{ type: 'group', text: answer }];
@@ -299,7 +285,7 @@ async function handleCustomerQuestion(
           issue_thread_id: thread.issueThreadId,
           actor: Actor.BOT,
           risk_level: action.riskLevel,
-          knowledge_card_id: action.card.id,
+          knowledge_card_id: action.card.card_id,
         });
       }
       return (
@@ -336,7 +322,7 @@ async function handleCustomerQuestion(
         group_id: groupId,
         issue_thread_id: thread.issueThreadId,
         actor: Actor.BOT,
-        knowledge_card_id: action.card.id,
+        knowledge_card_id: action.card.card_id,
       });
       return [{ type: 'group', text: csAnswer }];
     }
@@ -389,22 +375,47 @@ async function handlePrivateMessage(message: IncomingMessage): Promise<BotReply[
     return replies;
   }
 
-  if (await isActiveAdmin(message.userId)) {
+  const isActive = await isActiveConsultantOrAdmin(message.userId);
+
+  if (isActive) {
+    const naturalReplies = await handleConsultantNaturalLanguage({
+      userId: message.userId,
+      text,
+      isGroup: false,
+    });
+    if (naturalReplies) {
+      return naturalReplies;
+    }
+
+    if (isIdentityQueryPhrase(text)) {
+      replies.push({
+        type: 'push',
+        userId: message.userId,
+        text: await buildIdentityReply(message.userId),
+      });
+      return replies;
+    }
+
     replies.push({
       type: 'push',
       userId: message.userId,
-      text: `您目前是 active admin。\n您的 LINE userId: ${message.userId}`,
+      text: ACTIVE_PRIVATE_FALLBACK_HINT,
     });
     return replies;
   }
 
-  if (await isActiveConsultantOrAdmin(message.userId)) {
+  if (isIdentityQueryPhrase(text)) {
     replies.push({
       type: 'push',
       userId: message.userId,
-      text: `您目前是 active 顧問。\n您的 LINE userId: ${message.userId}`,
+      text: await buildIdentityReply(message.userId),
     });
     return replies;
+  }
+
+  const inactiveBlock = await buildInactiveWorkflowBlockReply(message.userId, text);
+  if (inactiveBlock) {
+    return inactiveBlock;
   }
 
   replies.push({
@@ -442,6 +453,10 @@ export async function processMessage(message: IncomingMessage): Promise<ProcessR
       replies.push(...(await handleServiceIntroduction(groupId, message.userId)));
       return { replies, events: await getEventLogs() };
     }
+    if (isNannyPeriodPhrase(text)) {
+      replies.push(...(await handleServiceIntroduction(groupId, message.userId)));
+      return { replies, events: await getEventLogs() };
+    }
     if (text === '重新啟用教學協助期') {
       replies.push(...(await handleServiceReactivationRequest(groupId, message.userId)));
       return { replies, events: await getEventLogs() };
@@ -466,6 +481,17 @@ export async function processMessage(message: IncomingMessage): Promise<ProcessR
     }
     if (isClosingSignal(text)) {
       await handleClosingSignal(groupId, message.userId, text);
+      return { replies, events: await getEventLogs() };
+    }
+
+    const naturalReplies = await handleConsultantNaturalLanguage({
+      userId: message.userId,
+      text,
+      groupId,
+      isGroup: true,
+    });
+    if (naturalReplies) {
+      replies.push(...naturalReplies);
       return { replies, events: await getEventLogs() };
     }
 

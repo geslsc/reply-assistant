@@ -233,7 +233,7 @@ describe('MVP Core Tests', () => {
     it('loads knowledge from local JSON only', async () => {
       loadKnowledgeBase();
       expect(getLoadedFromPath()).toContain('knowledge_items.json');
-      expect((await matchKnowledgeCard('怎麼登入後台')).card?.id).toBe('op-login');
+      expect((await matchKnowledgeCard('怎麼登入後台')).card?.card_id).toBe('op-login');
     });
   });
 
