@@ -4,6 +4,8 @@ import request from 'supertest';
 import { loadEnv, resetEnvCache } from '../src/config/env';
 import { resetRepositories } from '../src/repositories';
 import { handleLineWebhook } from '../src/routes/lineWebhook';
+import { setLlmClient } from '../src/services/knowledgeCardDraftService';
+import { setLineMessageClient } from '../src/services/lineMessageService';
 import {
   registerAdmin,
   registerInviteCode,
@@ -35,6 +37,8 @@ describe('LINE Webhook Tests', () => {
       LINE_CHANNEL_SECRET: SECRET,
     });
     await resetRepositories('memory');
+    setLlmClient(null);
+    setLineMessageClient(null);
 
     app = express();
     app.post('/webhook/line', express.raw({ type: '*/*' }), (req, res) => {
@@ -117,5 +121,53 @@ describe('LINE Webhook Tests', () => {
       .set('x-line-signature', sign(body))
       .send(body)
       .expect(200);
+  });
+
+  it('handles private AI draft in background and pushes the result', async () => {
+    await registerAdmin(TEST_ADMIN);
+    setLlmClient({
+      async complete() {
+        return JSON.stringify({
+          card_id: 'op-test',
+          title: '測試知識卡',
+          patterns: ['測試登入卡'],
+          risk_level: 'low',
+          can_public_reply: true,
+          standard_answer: '請依照測試步驟操作。',
+          not_applicable: [],
+          escalate_to_consultant: [],
+          status: '可用',
+        });
+      },
+    });
+
+    const pushed = new Promise<string>((resolve) => {
+      setLineMessageClient({
+        async replyText() {
+          throw new Error('private AI draft should not use replyMessage');
+        },
+        async pushText(_userId, text) {
+          resolve(text);
+        },
+      });
+    });
+
+    const body = buildWebhookBody([
+      {
+        type: 'message',
+        source: { type: 'user', userId: TEST_ADMIN },
+        message: { type: 'text', text: '整理知識卡：測試登入卡' },
+        replyToken: 'reply-token-private-ai',
+      },
+    ]);
+
+    await request(app)
+      .post('/webhook/line')
+      .set('Content-Type', 'application/json')
+      .set('x-line-signature', sign(body))
+      .send(body)
+      .expect(200);
+
+    await expect(pushed).resolves.toContain('【可直接貼入 JSON 的單卡草稿】');
   });
 });

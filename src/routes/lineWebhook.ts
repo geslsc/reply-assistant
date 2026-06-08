@@ -4,6 +4,10 @@ import { getEnv } from '../config/env';
 import { logger } from '../config/logger';
 import { processMessage, IncomingMessage } from '../handlers/lineWebhookHandler';
 import { deliverBotReplies } from '../services/lineMessageService';
+import {
+  classifyConsultantIntent,
+  isConsultantPrivateAiIntent,
+} from '../services/consultantIntentClassifier';
 
 interface LineWebhookEvent {
   type: string;
@@ -59,6 +63,19 @@ function mapLineEvent(event: LineWebhookEvent): IncomingMessage | 'non_text' | n
   };
 }
 
+function shouldHandleInBackground(message: IncomingMessage): boolean {
+  if (message.isGroup) {
+    return false;
+  }
+  const { intent } = classifyConsultantIntent(message.text);
+  return isConsultantPrivateAiIntent(intent);
+}
+
+async function processAndPush(message: IncomingMessage): Promise<void> {
+  const result = await processMessage(message);
+  await deliverBotReplies(result.replies, undefined);
+}
+
 export async function handleLineWebhook(req: Request, res: Response): Promise<void> {
   const rawBody = req.body as Buffer;
   const signature = req.headers['x-line-signature'] as string | undefined;
@@ -97,6 +114,16 @@ export async function handleLineWebhook(req: Request, res: Response): Promise<vo
         groupId: mapped.groupId,
         sourceType: mapped.sourceType,
       });
+
+      if (shouldHandleInBackground(mapped)) {
+        void processAndPush(mapped).catch((error) => {
+          logger.error('Background LINE AI assist failed', {
+            error: error instanceof Error ? error.message : String(error),
+            userId: mapped.userId,
+          });
+        });
+        continue;
+      }
 
       const result = await processMessage(mapped);
       await deliverBotReplies(result.replies, mapped.replyToken);

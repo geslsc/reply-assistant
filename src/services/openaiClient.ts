@@ -3,25 +3,30 @@ import { logger } from '../config/logger';
 import { LlmClient, setLlmClient } from './knowledgeCardDraftService';
 
 const DEFAULT_MODEL = 'gpt-4o-mini';
+const OPENAI_TIMEOUT_MS = 12_000;
 
 export function createOpenAiLlmClient(apiKey: string, model = DEFAULT_MODEL): LlmClient {
   return {
     async complete(systemPrompt: string, userPrompt: string): Promise<string> {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), OPENAI_TIMEOUT_MS);
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
         },
+        signal: controller.signal,
         body: JSON.stringify({
           model,
           temperature: 0,
+          max_tokens: 1200,
           messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userPrompt },
           ],
         }),
-      });
+      }).finally(() => clearTimeout(timeout));
 
       if (!response.ok) {
         const body = await response.text();
