@@ -50,4 +50,5 @@ export async function resetRepositories(mode: 'memory' | 'postgres' = 'memory'):
   await repos.pendingHandoffs.clear();
   await repos.pendingKnowledgeReviews.clear();
   await repos.dmSessions.clear();
+  await repos.groupMessageBuffers.clear();
 }

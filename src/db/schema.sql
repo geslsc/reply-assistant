@@ -236,3 +236,26 @@ CREATE INDEX IF NOT EXISTS idx_dm_sessions_user_id ON dm_sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_dm_sessions_status ON dm_sessions(status);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_dm_sessions_one_active_per_user
   ON dm_sessions(user_id) WHERE status = 'active';
+
+-- group_message_buffers：群組店家訊息收斂 buffer（debounce 期間持久化）
+CREATE TABLE IF NOT EXISTS group_message_buffers (
+  buffer_id TEXT PRIMARY KEY,
+  group_id TEXT NOT NULL,
+  customer_user_id TEXT NOT NULL,
+  issue_thread_id TEXT NOT NULL,
+  messages_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+  status TEXT NOT NULL DEFAULT 'collecting',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT group_message_buffers_status_check CHECK (
+    status IN ('collecting', 'resolved', 'expired')
+  )
+);
+
+CREATE INDEX IF NOT EXISTS idx_group_message_buffers_group_customer_collecting
+  ON group_message_buffers(group_id, customer_user_id)
+  WHERE status = 'collecting';
+
+CREATE INDEX IF NOT EXISTS idx_group_message_buffers_collecting_updated
+  ON group_message_buffers(status, updated_at)
+  WHERE status = 'collecting';

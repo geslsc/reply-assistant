@@ -44,12 +44,33 @@ npm start
 | `CONSULTANT_INVITE_CODE` | 顧問加入邀請碼 |
 | `OFFICIAL_CS_*` | 官方客服導流資訊（覆蓋 JSON placeholder） |
 | `LOG_LEVEL` | `debug` / `info` / `warn` / `error` |
-| `OPENAI_API_KEY` | **選填**。OpenAI API Key，僅用於顧問私訊 AI 草稿／摘要與私訊截圖理解；未設定時系統仍可啟動，AI 功能不可用 |
+| `OPENAI_API_KEY` | **選填**。OpenAI API Key，用於群組語意挑卡／清晰度判斷、顧問私訊 AI 草稿／摘要與私訊截圖理解；未設定時系統仍可啟動，群組語意判斷降級為關鍵字比對 |
 | `OPENAI_VISION_MODEL` | 私訊截圖 vision 模型，預設 `gpt-4o` |
 | `KNOWLEDGE_EXPORT_REMINDER_DAYS` | admin 私訊被動備份提醒天數，預設 `7` |
 | `DM_SESSION_TIMEOUT_HOURS` | 私訊草稿 session 被動過期小時數，預設 `24`（無 cron，每次私訊檢查） |
+| `DEBOUNCE_SECONDS` | 群組店家訊息收斂 debounce 秒數，預設 `60`（允許 `setTimeout` 短時 debounce；buffer 存 DB，重啟後由下一個群組事件補結算） |
 
-## PostgreSQL 初始化
+## 群組訊息收斂與語意分流
+
+店家在群組連續發話時，小助手會先收斂成同一個問題，再進行語意判斷：
+
+1. **收斂 buffer（DB）**：同一 `group_id + customer_user_id` 的連續訊息 append 到 `group_message_buffers`，不拆成多筆問題。
+2. **Debounce**：預設 `DEBOUNCE_SECONDS=60`；60 秒內再發話會重設計時器。高風險關鍵字（帳務 / 金流 / 權限 / 資料異常等）則立即收斂。
+3. **重啟補結算**：Railway 重啟導致 `setTimeout` 消失時，下一個群組事件會檢查 `status=collecting` 且已逾 debounce 窗的 buffer 並補做收斂。
+4. **顧問插話**：顧問 / admin 在群組發話時，立即 flush 收斂中的店家 buffer 並處理，顧問訊息本身不視為店家問題。
+5. **LLM 語意分流**（僅挑卡 + 清晰度，不生成公開答案）：
+   - 意圖清楚 + 低風險可公開卡 → 逐字 `standard_answer` + 固定收尾句
+   - 中高風險 / 不可公開 / 無對應卡 → 固定緩衝話術 + 通知 fallback admin（僅 active admin，不通知所有 active consultants）
+   - 意圖模糊 → 既有 `AI_CLARIFYING` 客製釐清（兩輪後仍不清楚則 handoff）
+6. **OPENAI_API_KEY 選填**：未設定時語意判斷降級為關鍵字比對 + 原有 heuristics，系統正常啟動。
+
+固定緩衝話術（非 LLM 生成）：「您的問題我已經記下並請顧問協助確認，請稍等一下喔。」
+
+部署前若 schema 有更新，請執行：
+
+```bash
+npm run db:migrate
+```
 
 ```bash
 createdb reply_assistant

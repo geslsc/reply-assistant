@@ -28,6 +28,7 @@ import { createPostgresPendingHandoffRepository } from './postgresPendingHandoff
 import { createPostgresPendingKnowledgeReviewRepository } from './postgresPendingKnowledgeReviewRepository';
 import { createPostgresDmSessionRepository } from './postgresDmSessionRepository';
 import { createPostgresKnowledgeCardRepository } from './postgresKnowledgeCardRepository';
+import { createPostgresGroupMessageBufferRepository } from './postgresGroupMessageBufferRepository';
 import {
   mapConsultantRow,
   mapGroupRow,
@@ -448,5 +449,6 @@ export function createPostgresRepositories(pool: Pool = getPool()): Repositories
     pendingHandoffs: createPostgresPendingHandoffRepository(pool),
     pendingKnowledgeReviews: createPostgresPendingKnowledgeReviewRepository(pool),
     dmSessions: createPostgresDmSessionRepository(pool),
+    groupMessageBuffers: createPostgresGroupMessageBufferRepository(pool),
   };
 }

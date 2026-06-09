@@ -79,6 +79,10 @@ export async function pushText(userId: string, text: string): Promise<string | n
   }
 }
 
+export async function pushGroupText(groupId: string, text: string): Promise<string | null> {
+  return pushText(groupId, text);
+}
+
 export async function pushToAdmins(text: string): Promise<void> {
   const admins = await getActiveAdmins();
   for (const admin of admins) {
@@ -100,6 +104,27 @@ export async function deliverBotReplies(
   const mergedGroupText = mergeGroupReplies(replies);
   if (replyToken && mergedGroupText.length > 0) {
     await replyText(replyToken, mergedGroupText);
+  } else if (mergedGroupText.length > 0) {
+    logger.warn('Group replies without replyToken cannot be delivered inline');
+  }
+
+  for (const reply of replies) {
+    if (reply.type === 'push' && reply.userId) {
+      const messageId = await pushText(reply.userId, reply.text);
+      if (reply.trackReviewId && messageId) {
+        await registerReviewMessageMapping(reply.trackReviewId, messageId);
+      }
+    }
+  }
+}
+
+export async function deliverDeferredGroupReplies(
+  replies: BotReply[],
+  groupId: string
+): Promise<void> {
+  const mergedGroupText = mergeGroupReplies(replies);
+  if (mergedGroupText.length > 0) {
+    await pushGroupText(groupId, mergedGroupText);
   }
 
   for (const reply of replies) {

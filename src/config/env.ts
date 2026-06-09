@@ -18,6 +18,7 @@ export interface AppEnv {
   OPENAI_VISION_MODEL: string;
   KNOWLEDGE_EXPORT_REMINDER_DAYS: number;
   DM_SESSION_TIMEOUT_HOURS: number;
+  DEBOUNCE_SECONDS: number;
 }
 
 let cachedEnv: AppEnv | null = null;
@@ -61,6 +62,8 @@ export function loadEnv(overrides: Partial<AppEnv> = {}): AppEnv {
       Number(process.env.KNOWLEDGE_EXPORT_REMINDER_DAYS ?? 7),
     DM_SESSION_TIMEOUT_HOURS:
       overrides.DM_SESSION_TIMEOUT_HOURS ?? Number(process.env.DM_SESSION_TIMEOUT_HOURS ?? 24),
+    DEBOUNCE_SECONDS:
+      overrides.DEBOUNCE_SECONDS ?? Number(process.env.DEBOUNCE_SECONDS ?? 60),
   };
   return cachedEnv;
 }

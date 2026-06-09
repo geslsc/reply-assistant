@@ -13,6 +13,7 @@ import {
   approveConsultant,
 } from '../src/services/consultantWhitelist';
 import { handleServiceIntroduction } from '../src/services/servicePeriodService';
+import { initKnowledgeBase } from '../src/services/knowledgeBaseService';
 import { processMessage } from '../src/handlers/lineWebhookHandler';
 import * as dmSessionImageService from '../src/services/dmSessionImageService';
 import { TEST_ADMIN, TEST_CONSULTANT, TEST_CUSTOMER, TEST_GROUP } from './helpers/testSetup';
@@ -35,11 +36,13 @@ describe('LINE Webhook Tests', () => {
     loadEnv({
       NODE_ENV: 'test',
       USE_MEMORY_REPOS: true,
+      DEBOUNCE_SECONDS: 0,
       LINE_CHANNEL_SECRET: SECRET,
     });
     await resetRepositories('memory');
     setLlmClient(null);
     setLineMessageClient(null);
+    await initKnowledgeBase();
 
     app = express();
     app.post('/webhook/line', express.raw({ type: '*/*' }), (req, res) => {

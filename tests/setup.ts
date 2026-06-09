@@ -6,6 +6,7 @@ import { clearAllPendingConfirmations } from '../src/services/consultantConfirma
 import { clearKnowledgeCardWriteState } from '../src/services/knowledgeCardWriteService';
 import { clearBulkImportState } from '../src/services/knowledgeCardImportService';
 import { clearPrivateFallbackState } from '../src/services/privateFallbackHintService';
+import { clearConvergenceTimersForTest } from '../src/services/groupMessageConvergenceService';
 import { setLineGroupSummaryClient } from '../src/services/lineGroupSummaryService';
 
 beforeEach(async () => {
@@ -13,10 +14,12 @@ beforeEach(async () => {
   loadEnv({
     NODE_ENV: 'test',
     USE_MEMORY_REPOS: true,
+    DEBOUNCE_SECONDS: 0,
     LINE_CHANNEL_SECRET: 'test-channel-secret',
     LINE_CHANNEL_ACCESS_TOKEN: 'test-access-token',
   });
   await resetRepositories('memory');
+  clearConvergenceTimersForTest();
   clearAllPendingConfirmations();
   clearKnowledgeCardWriteState();
   clearPrivateFallbackState();

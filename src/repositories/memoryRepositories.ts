@@ -26,6 +26,7 @@ import { createMemoryPendingHandoffRepository } from './memoryPendingHandoffRepo
 import { createMemoryKnowledgeCardRepository } from './memoryKnowledgeCardRepository';
 import { createMemoryPendingKnowledgeReviewRepository } from './memoryPendingKnowledgeReviewRepository';
 import { createMemoryDmSessionRepository } from './memoryDmSessionRepository';
+import { createMemoryGroupMessageBufferRepository } from './memoryGroupMessageBufferRepository';
 
 const VALID_EVENT_TYPES = new Set(Object.values(EventType));
 const VALID_ACTORS = new Set(Object.values(Actor));
@@ -311,5 +312,6 @@ export function createMemoryRepositories(): Repositories {
     pendingHandoffs: createMemoryPendingHandoffRepository(),
     pendingKnowledgeReviews,
     dmSessions,
+    groupMessageBuffers: createMemoryGroupMessageBufferRepository(),
   };
 }

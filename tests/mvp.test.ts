@@ -145,11 +145,14 @@ describe('MVP Core Tests', () => {
   });
 
   describe('5. 中高風險不公開改私訊顧問', () => {
-    it('mid/high risk handoffs to consultant via push, no group answer', async () => {
+    it('mid/high risk handoffs to consultant via push with buffer message only', async () => {
       await setupServicePeriod();
       const result = await processMessage(groupMsg(TEST_CUSTOMER, '畫面一片空白'));
 
-      expect(result.replies.find((r) => r.type === 'group')).toBeUndefined();
+      const groupReply = result.replies.find((r) => r.type === 'group');
+      expect(groupReply?.text).toBe(
+        '您的問題我已經記下並請顧問協助確認，請稍等一下喔。'
+      );
       expect(result.replies.filter((r) => r.type === 'push').length).toBeGreaterThan(0);
       expect((await getEventsByType(EventType.HANDOFF_TO_CONSULTANT)).length).toBe(1);
     });

@@ -6,9 +6,11 @@ import { setVisionClient } from '../../src/services/screenshotVisionService';
 import { setLineImageContentClient } from '../../src/services/lineImageContentService';
 import { clearKnowledgeCardWriteState } from '../../src/services/knowledgeCardWriteService';
 import { clearBulkImportState } from '../../src/services/knowledgeCardImportService';
+import { clearConvergenceTimersForTest } from '../../src/services/groupMessageConvergenceService';
 
 export async function resetTestState(): Promise<void> {
   await resetRepositories('memory');
+  clearConvergenceTimersForTest();
   clearAllPendingConfirmations();
   clearKnowledgeCardWriteState();
   clearBulkImportState();

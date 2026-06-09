@@ -93,4 +93,5 @@ export interface Repositories {
   pendingHandoffs: import('./pendingHandoffTypes').PendingHandoffRepository;
   pendingKnowledgeReviews: import('./pendingKnowledgeReviewTypes').PendingKnowledgeReviewRepository;
   dmSessions: import('./dmSessionTypes').DmSessionRepository;
+  groupMessageBuffers: import('./groupMessageBufferTypes').GroupMessageBufferRepository;
 }

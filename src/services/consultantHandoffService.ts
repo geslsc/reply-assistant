@@ -1,7 +1,7 @@
 import { Actor, BotReply, EventType, RiskLevel, ThreadState } from '../types';
 import { KnowledgeCard } from '../schemas/knowledgeCardSchema';
 import { createEvent } from './eventLogService';
-import { getActiveConsultants } from './consultantWhitelist';
+import { getActiveAdmins, getActiveConsultants } from './consultantWhitelist';
 import { transitionState } from './stateMachine';
 import { getIssueThread, updateIssueThread } from './issueThreadService';
 import {
@@ -68,6 +68,8 @@ export function formatHandoffMessage(
   ].join('\n');
 }
 
+export type HandoffNotifyTarget = 'all_consultants' | 'fallback_admin';
+
 export async function executeHandoff(params: {
   groupId: string;
   issueThreadId: string;
@@ -76,6 +78,7 @@ export async function executeHandoff(params: {
   reason: string;
   riskLevel: RiskLevel;
   actorUserId?: string | null;
+  notifyTarget?: HandoffNotifyTarget;
 }): Promise<{ replies: BotReply[]; draft: HandoffDraft }> {
   const draft = buildHandoffDraft({
     customerQuestion: params.customerQuestion,
@@ -107,7 +110,11 @@ export async function executeHandoff(params: {
     detail: params.reason,
   });
 
-  const consultants = await getActiveConsultants();
+  const notifyTarget = params.notifyTarget ?? 'all_consultants';
+  const recipients =
+    notifyTarget === 'fallback_admin'
+      ? await getActiveAdmins()
+      : await getActiveConsultants();
   const thread = await getIssueThread(params.groupId, params.issueThreadId);
   const shortCode = deriveShortCode(
     params.issueThreadId,
@@ -123,12 +130,12 @@ export async function executeHandoff(params: {
     issueThreadId: params.issueThreadId,
     shortCode,
     customerQuestion: params.customerQuestion,
-    consultantIds: consultants.map((c) => c.userId),
+    consultantIds: recipients.map((recipient) => recipient.userId),
   });
 
   const replies: BotReply[] = [];
-  for (const consultant of consultants) {
-    const activeSession = await getActiveSession(consultant.userId);
+  for (const recipient of recipients) {
+    const activeSession = await getActiveSession(recipient.userId);
     const text = activeSession
       ? buildHandoffShortReminder({
           groupId: params.groupId,
@@ -142,7 +149,7 @@ export async function executeHandoff(params: {
         });
     replies.push({
       type: 'push',
-      userId: consultant.userId,
+      userId: recipient.userId,
       text,
     });
   }
@@ -155,6 +162,7 @@ export async function handleKnowledgeMiss(params: {
   issueThreadId: string;
   question: string;
   actorUserId?: string | null;
+  notifyTarget?: HandoffNotifyTarget;
 }): Promise<BotReply[]> {
   await createEvent({
     event_type: EventType.KNOWLEDGE_MISS,
@@ -183,6 +191,7 @@ export async function handleKnowledgeMiss(params: {
       reason: '知識庫未命中',
       riskLevel: RiskLevel.UNKNOWN,
       actorUserId: params.actorUserId,
+      notifyTarget: params.notifyTarget,
     })
   ).replies;
 }

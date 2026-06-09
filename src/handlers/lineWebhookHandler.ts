@@ -20,10 +20,6 @@ import {
 } from '../services/consultantWhitelist';
 import { createEvent, getEventLogs, logStateTransition } from '../services/eventLogService';
 import {
-  executeHandoff,
-  handleKnowledgeMiss,
-} from '../services/consultantHandoffService';
-import {
   getGroupFlags,
   isMuted,
   setMute,
@@ -54,23 +50,20 @@ import {
 } from '../services/privateFallbackHintService';
 import { handleConsultantMute } from '../services/consultantGroupControlService';
 import { isNannyPeriodPhrase, isNannyPeriodApproximatePhrase, NANNY_PERIOD_STANDARD_SYNTAX_HINT } from '../services/consultantIntentClassifier';
-import { buildOfficialCsAnswer } from '../services/officialCsService';
 import {
-  createIssueThread,
   getActiveIssueThread,
   getThreadsByGroup,
   hasSubstantiveAnswer,
   markConsultantAnswered,
   reopenThread,
   resolveThread,
-  updateIssueThread,
 } from '../services/issueThreadService';
 import { settleGroupTimeouts } from '../services/passiveTimeoutSettlement';
 import {
-  buildPublicAnswer,
-  isQuestionUnclear,
-  routeQuestion,
-} from '../services/riskRouter';
+  flushCollectingBuffersForGroup,
+  handleIncomingCustomerGroupMessage,
+  settleExpiredGroupBuffers,
+} from '../services/groupMessageConvergenceService';
 import {
   handleServiceIntroduction,
   handleServiceReactivationConfirm,
@@ -78,11 +71,6 @@ import {
   isOutOfService,
 } from '../services/servicePeriodService';
 import { refreshGroupNameIfNeeded } from '../services/lineGroupSummaryService';
-import {
-  getClarifyRound,
-  incrementClarifyRound,
-  transitionState,
-} from '../services/stateMachine';
 
 export interface IncomingMessage {
   userId: string;
@@ -111,24 +99,6 @@ function isReopenSignal(text: string): boolean {
 function isStandbyPhrase(text: string): boolean {
   const trimmed = text.trim();
   return STANDBY_PHRASES.some((s) => trimmed === s || trimmed.includes(s.replace('?', '？')));
-}
-
-async function getOrCreateActiveThread(groupId: string, question: string) {
-  let thread = await getActiveIssueThread(groupId);
-  if (!thread) {
-    thread = await createIssueThread(groupId, question);
-    await logStateTransition({
-      group_id: groupId,
-      issue_thread_id: thread.issueThreadId,
-      from_state: ThreadState.IDLE,
-      to_state: ThreadState.IDLE,
-      actor: Actor.CUSTOMER,
-      detail: 'new issue thread created',
-    });
-  } else {
-    await updateIssueThread(groupId, thread.issueThreadId, { customerQuestion: question });
-  }
-  return thread;
 }
 
 async function handleClosingSignal(
@@ -212,7 +182,8 @@ async function handlePauseKnowledgeCard(
 async function handleCustomerQuestion(
   groupId: string,
   userId: string,
-  text: string
+  text: string,
+  options?: { messageId?: string; timestamp?: string }
 ): Promise<BotReply[]> {
   if (await isMuted(groupId)) {
     return [];
@@ -247,107 +218,13 @@ async function handleCustomerQuestion(
     }
   }
 
-  const thread = await getOrCreateActiveThread(groupId, text);
-  const clarifyRound = await getClarifyRound(groupId, thread.issueThreadId);
-  const unclear = isQuestionUnclear(text);
-  const action = await routeQuestion(text, { clarifyRound, isUnclear: unclear });
-
-  switch (action.type) {
-    case 'public_answer': {
-      const answer = buildPublicAnswer(action.card.standard_answer);
-      await transitionState({
-        groupId,
-        issueThreadId: thread.issueThreadId,
-        toState: ThreadState.AI_ANSWERING,
-        actor: Actor.BOT,
-        detail: 'low risk public answer',
-      });
-      await updateIssueThread(groupId, thread.issueThreadId, {
-        lastKnowledgeCardId: action.card.card_id,
-      });
-      await createEvent({
-        event_type: EventType.KNOWLEDGE_HIT,
-        group_id: groupId,
-        issue_thread_id: thread.issueThreadId,
-        actor: Actor.BOT,
-        risk_level: action.card.risk_level,
-        knowledge_card_id: action.card.card_id,
-      });
-      await createEvent({
-        event_type: EventType.AI_ANSWER,
-        group_id: groupId,
-        issue_thread_id: thread.issueThreadId,
-        actor: Actor.BOT,
-        risk_level: action.card.risk_level,
-        knowledge_card_id: action.card.card_id,
-        detail: answer,
-      });
-      return [{ type: 'group', text: answer }];
-    }
-    case 'clarify': {
-      await incrementClarifyRound(groupId, thread.issueThreadId);
-      await transitionState({
-        groupId,
-        issueThreadId: thread.issueThreadId,
-        toState: ThreadState.AI_CLARIFYING,
-        actor: Actor.BOT,
-        detail: `clarify round ${clarifyRound + 1}`,
-      });
-      return [{ type: 'group', text: action.question }];
-    }
-    case 'handoff': {
-      if (action.card) {
-        await createEvent({
-          event_type: EventType.KNOWLEDGE_HIT,
-          group_id: groupId,
-          issue_thread_id: thread.issueThreadId,
-          actor: Actor.BOT,
-          risk_level: action.riskLevel,
-          knowledge_card_id: action.card.card_id,
-        });
-      }
-      return (
-        await executeHandoff({
-          groupId,
-          issueThreadId: thread.issueThreadId,
-          customerQuestion: text,
-          card: action.card,
-          reason: action.reason,
-          riskLevel: action.riskLevel,
-          actorUserId: userId,
-        })
-      ).replies;
-    }
-    case 'knowledge_miss': {
-      await transitionState({
-        groupId,
-        issueThreadId: thread.issueThreadId,
-        toState: ThreadState.CONSULTANT_HANDOFF,
-        actor: Actor.SYSTEM,
-        detail: 'knowledge miss',
-      });
-      return handleKnowledgeMiss({
-        groupId,
-        issueThreadId: thread.issueThreadId,
-        question: text,
-        actorUserId: userId,
-      });
-    }
-    case 'official_cs': {
-      const csAnswer = buildOfficialCsAnswer(action.card);
-      await createEvent({
-        event_type: EventType.OFFICIAL_CS_REDIRECT,
-        group_id: groupId,
-        issue_thread_id: thread.issueThreadId,
-        actor: Actor.BOT,
-        knowledge_card_id: action.card.card_id,
-      });
-      return [{ type: 'group', text: csAnswer }];
-    }
-    case 'no_action':
-    default:
-      return [];
-  }
+  return handleIncomingCustomerGroupMessage({
+    groupId,
+    customerUserId: userId,
+    text,
+    messageId: options?.messageId,
+    timestamp: options?.timestamp,
+  });
 }
 
 async function handlePrivateMessage(message: IncomingMessage): Promise<BotReply[]> {
@@ -512,11 +389,13 @@ export async function processMessage(message: IncomingMessage): Promise<ProcessR
   const groupId = message.groupId!;
   await refreshGroupNameIfNeeded(groupId);
   await settleGroupTimeouts(groupId);
+  replies.push(...(await settleExpiredGroupBuffers(groupId)));
 
   const text = message.text.trim();
   const isConsultant = await isActiveConsultantOrAdmin(message.userId);
 
   if (isConsultant) {
+    replies.push(...(await flushCollectingBuffersForGroup(groupId)));
     if (isUsageGuideRequest(text)) {
       replies.push(...handleGroupUsageGuide());
       return { replies, events: await getEventLogs() };
@@ -597,7 +476,12 @@ export async function processMessage(message: IncomingMessage): Promise<ProcessR
   }
 
   if (!isConsultant) {
-    replies.push(...(await handleCustomerQuestion(groupId, message.userId, text)));
+    replies.push(
+      ...(await handleCustomerQuestion(groupId, message.userId, text, {
+        messageId: message.replyToken,
+        timestamp: message.timestamp,
+      }))
+    );
   }
 
   return { replies, events: await getEventLogs() };
