@@ -28,7 +28,9 @@ import { createPostgresPendingHandoffRepository } from './postgresPendingHandoff
 import { createPostgresPendingKnowledgeReviewRepository } from './postgresPendingKnowledgeReviewRepository';
 import { createPostgresDmSessionRepository } from './postgresDmSessionRepository';
 import { createPostgresKnowledgeCardRepository } from './postgresKnowledgeCardRepository';
+import { createPostgresConsultantApplicationRepository } from './postgresConsultantApplicationRepository';
 import { createPostgresGroupMessageBufferRepository } from './postgresGroupMessageBufferRepository';
+import { createPostgresGroupConsultantAssignmentRepository } from './postgresGroupConsultantAssignmentRepository';
 import {
   mapConsultantRow,
   mapGroupRow,
@@ -53,6 +55,8 @@ function defaultGroupFlags(groupId: string): GroupFlags {
     serviceEndAt: null,
     activeIssueThreadId: null,
     serviceReactivationPending: false,
+    botLeftAt: null,
+    servicePeriodEndNotified: false,
   };
 }
 
@@ -85,6 +89,8 @@ function createGroupRepository(pool: Pool): GroupRepository {
           service_end_at = $8,
           active_issue_thread_id = $9,
           service_reactivation_pending = $10,
+          bot_left_at = $11,
+          service_period_end_notified = $12,
           updated_at = NOW()
         WHERE group_id = $1`,
         [
@@ -98,6 +104,8 @@ function createGroupRepository(pool: Pool): GroupRepository {
           next.serviceEndAt,
           next.activeIssueThreadId,
           next.serviceReactivationPending,
+          next.botLeftAt,
+          next.servicePeriodEndNotified,
         ]
       );
       return this.getOrCreate(groupId);
@@ -316,14 +324,13 @@ function createConsultantRepository(pool: Pool): ConsultantRepository {
          VALUES ($1, $2, $3, $4, $5)
          ON CONFLICT (line_user_id) DO UPDATE SET
            role = EXCLUDED.role,
-           status = EXCLUDED.status,
            invite_code = EXCLUDED.invite_code,
            display_name = COALESCE(EXCLUDED.display_name, consultants.display_name),
            updated_at = NOW()`,
         [
           userId,
           ConsultantRole.CONSULTANT,
-          ConsultantStatus.PENDING,
+          ConsultantStatus.DISABLED,
           inviteCode.toUpperCase(),
           displayName ?? null,
         ]
@@ -336,17 +343,20 @@ function createConsultantRepository(pool: Pool): ConsultantRepository {
         return { success: false, message: '只有 active admin 可核准' };
       }
       const target = await this.findById(targetUserId);
-      if (!target || target.status !== ConsultantStatus.PENDING) {
-        return { success: false, message: '找不到 pending 顧問' };
+      if (!target) {
+        return { success: false, message: '找不到顧問' };
       }
+      const consultantCode =
+        target.consultantCode ?? `C-legacy-${targetUserId.slice(-4)}`;
       await pool.query(
-        `UPDATE consultants SET status = $2, approved_by = $3, approved_at = NOW(), updated_at = NOW()
+        `UPDATE consultants SET status = $2, approved_by = $3, approved_at = NOW(),
+         consultant_code = COALESCE(consultant_code, $4), updated_at = NOW()
          WHERE line_user_id = $1`,
-        [targetUserId, ConsultantStatus.ACTIVE, adminUserId]
+        [targetUserId, ConsultantStatus.ACTIVE, adminUserId, consultantCode]
       );
       return { success: true, message: '已核准' };
     },
-    async disable(adminUserId, targetUserId) {
+    async disable(adminUserId, targetUserId, disabledBy) {
       const admin = await this.findById(adminUserId);
       if (!admin || admin.status !== ConsultantStatus.ACTIVE || admin.role !== ConsultantRole.ADMIN) {
         return { success: false, message: '只有 active admin 可停用' };
@@ -356,15 +366,69 @@ function createConsultantRepository(pool: Pool): ConsultantRepository {
         return { success: false, message: '找不到顧問' };
       }
       await pool.query(
-        `UPDATE consultants SET status = $2, disabled_at = NOW(), updated_at = NOW()
+        `UPDATE consultants SET status = $2, disabled_by = $3, disabled_at = NOW(), updated_at = NOW()
          WHERE line_user_id = $1`,
-        [targetUserId, ConsultantStatus.DISABLED]
+        [targetUserId, ConsultantStatus.DISABLED, disabledBy ?? adminUserId]
       );
       return { success: true, message: '已停用' };
+    },
+    async enable(adminUserId, targetUserId) {
+      const admin = await this.findById(adminUserId);
+      if (!admin || admin.status !== ConsultantStatus.ACTIVE || admin.role !== ConsultantRole.ADMIN) {
+        return { success: false, message: '只有 active admin 可啟用' };
+      }
+      const target = await this.findById(targetUserId);
+      if (!target) {
+        return { success: false, message: '找不到顧問' };
+      }
+      await pool.query(
+        `UPDATE consultants SET status = $2, disabled_by = NULL, disabled_at = NULL, updated_at = NOW()
+         WHERE line_user_id = $1`,
+        [targetUserId, ConsultantStatus.ACTIVE]
+      );
+      return { success: true, message: '已啟用' };
+    },
+    async upsertApprovedConsultant(params) {
+      await pool.query(
+        `INSERT INTO consultants (
+          line_user_id, role, status, display_name, consultant_code, approved_by, approved_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+        ON CONFLICT (line_user_id) DO UPDATE SET
+          role = EXCLUDED.role,
+          status = EXCLUDED.status,
+          display_name = EXCLUDED.display_name,
+          consultant_code = EXCLUDED.consultant_code,
+          approved_by = EXCLUDED.approved_by,
+          approved_at = EXCLUDED.approved_at,
+          disabled_by = NULL,
+          disabled_at = NULL,
+          updated_at = NOW()`,
+        [
+          params.userId,
+          ConsultantRole.CONSULTANT,
+          ConsultantStatus.ACTIVE,
+          params.displayName,
+          params.consultantCode,
+          params.approvedBy,
+          params.approvedAt,
+        ]
+      );
+      return (await this.findById(params.userId))!;
     },
     async findById(userId) {
       const result = await pool.query('SELECT * FROM consultants WHERE line_user_id = $1', [userId]);
       return result.rows[0] ? mapConsultantRow(result.rows[0]) : null;
+    },
+    async findByConsultantCode(consultantCode) {
+      const result = await pool.query(
+        'SELECT * FROM consultants WHERE consultant_code = $1',
+        [consultantCode]
+      );
+      return result.rows[0] ? mapConsultantRow(result.rows[0]) : null;
+    },
+    async findAll() {
+      const result = await pool.query('SELECT * FROM consultants ORDER BY created_at ASC');
+      return result.rows.map(mapConsultantRow);
     },
     async findActive() {
       const result = await pool.query(
@@ -374,10 +438,7 @@ function createConsultantRepository(pool: Pool): ConsultantRepository {
       return result.rows.map(mapConsultantRow);
     },
     async findPending() {
-      const result = await pool.query('SELECT * FROM consultants WHERE status = $1', [
-        ConsultantStatus.PENDING,
-      ]);
-      return result.rows.map(mapConsultantRow);
+      return [];
     },
     async findActiveAdmins() {
       const result = await pool.query(
@@ -450,5 +511,7 @@ export function createPostgresRepositories(pool: Pool = getPool()): Repositories
     pendingKnowledgeReviews: createPostgresPendingKnowledgeReviewRepository(pool),
     dmSessions: createPostgresDmSessionRepository(pool),
     groupMessageBuffers: createPostgresGroupMessageBufferRepository(pool),
+    consultantApplications: createPostgresConsultantApplicationRepository(pool),
+    groupConsultantAssignments: createPostgresGroupConsultantAssignmentRepository(pool),
   };
 }

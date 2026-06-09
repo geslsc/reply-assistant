@@ -63,5 +63,14 @@ export interface PendingHandoffRepository {
     reason: PendingHandoffInvalidReason
   ): Promise<number>;
   markSnoozed(id: string): Promise<PendingHandoff | null>;
+  findOpenByConsultantAndGroup(
+    consultantId: string,
+    groupId: string
+  ): Promise<PendingHandoff[]>;
+  transferOpenHandoffs(params: {
+    fromConsultantId: string;
+    toConsultantId: string;
+    groupId: string;
+  }): Promise<number>;
   clear(): Promise<void>;
 }

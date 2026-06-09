@@ -6,6 +6,7 @@ import {
   isServiceExpired,
   updateGroupFlags,
 } from './groupFlags';
+import { ensureGroupAssignment } from './groupConsultantAssignmentService';
 
 export const INTRO_MESSAGE = `老師好，我是客立樂教學小助手。
 
@@ -33,6 +34,8 @@ export async function handleServiceIntroduction(
   groupId: string,
   consultantUserId: string
 ): Promise<BotReply[]> {
+  await ensureGroupAssignment(groupId);
+
   if (await isInServicePeriod(groupId)) {
     return [{ type: 'group', text: ALREADY_ACTIVE_MESSAGE }];
   }

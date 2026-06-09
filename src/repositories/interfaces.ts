@@ -8,6 +8,7 @@ import {
   RiskLevel,
   ThreadState,
 } from '../types';
+import { ConsultantApplicationRepository } from './consultantApplicationTypes';
 
 export interface CreateEventParams {
   event_type: EventType;
@@ -66,8 +67,22 @@ export interface ConsultantRepository {
   isValidInviteCode(code: string): Promise<boolean>;
   requestJoin(userId: string, inviteCode: string, displayName?: string | null): Promise<ConsultantRecord>;
   approve(adminUserId: string, targetUserId: string): Promise<{ success: boolean; message: string }>;
-  disable(adminUserId: string, targetUserId: string): Promise<{ success: boolean; message: string }>;
+  disable(
+    adminUserId: string,
+    targetUserId: string,
+    disabledBy?: string
+  ): Promise<{ success: boolean; message: string }>;
+  enable(adminUserId: string, targetUserId: string): Promise<{ success: boolean; message: string }>;
+  upsertApprovedConsultant(params: {
+    userId: string;
+    displayName: string | null;
+    consultantCode: string;
+    approvedBy: string;
+    approvedAt: string;
+  }): Promise<ConsultantRecord>;
   findById(userId: string): Promise<ConsultantRecord | null>;
+  findByConsultantCode(consultantCode: string): Promise<ConsultantRecord | null>;
+  findAll(): Promise<ConsultantRecord[]>;
   findActive(): Promise<ConsultantRecord[]>;
   findPending(): Promise<ConsultantRecord[]>;
   findActiveAdmins(): Promise<ConsultantRecord[]>;
@@ -94,4 +109,6 @@ export interface Repositories {
   pendingKnowledgeReviews: import('./pendingKnowledgeReviewTypes').PendingKnowledgeReviewRepository;
   dmSessions: import('./dmSessionTypes').DmSessionRepository;
   groupMessageBuffers: import('./groupMessageBufferTypes').GroupMessageBufferRepository;
+  consultantApplications: ConsultantApplicationRepository;
+  groupConsultantAssignments: import('./groupConsultantAssignmentTypes').GroupConsultantAssignmentRepository;
 }

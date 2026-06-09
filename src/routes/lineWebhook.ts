@@ -4,6 +4,8 @@ import { getEnv } from '../config/env';
 import { logger } from '../config/logger';
 import { processMessage, IncomingMessage } from '../handlers/lineWebhookHandler';
 import { deliverBotReplies } from '../services/lineMessageService';
+import { handleBotLeaveGroup } from '../services/botLeaveGroupService';
+import { handleBotJoinGroup } from '../services/botJoinGroupService';
 import { handlePrivateImageMessage } from '../services/dmSessionImageService';
 import {
   classifyConsultantIntent,
@@ -57,6 +59,26 @@ function isIncomingImageMessage(
   mapped: IncomingMessage | IncomingImageMessage
 ): mapped is IncomingImageMessage {
   return 'kind' in mapped && mapped.kind === 'image';
+}
+
+export function mapJoinEvent(event: LineWebhookEvent): { groupId: string } | null {
+  if (event.type !== 'join') {
+    return null;
+  }
+  if (event.source.type !== 'group' || !event.source.groupId) {
+    return null;
+  }
+  return { groupId: event.source.groupId };
+}
+
+export function mapLeaveEvent(event: LineWebhookEvent): { groupId: string } | null {
+  if (event.type !== 'leave') {
+    return null;
+  }
+  if (event.source.type !== 'group' || !event.source.groupId) {
+    return null;
+  }
+  return { groupId: event.source.groupId };
 }
 
 export function mapLineEvent(event: LineWebhookEvent): MappedLineEvent {
@@ -144,6 +166,30 @@ export async function handleLineWebhook(req: Request, res: Response): Promise<vo
 
   try {
     for (const event of body.events ?? []) {
+      const leave = mapLeaveEvent(event);
+      if (leave) {
+        void handleBotLeaveGroup(leave.groupId)
+          .then((replies) => deliverBotReplies(replies, undefined))
+          .catch((error) => {
+            logger.error('LINE leave event handling failed', {
+              error: error instanceof Error ? error.message : String(error),
+              groupId: leave.groupId,
+            });
+          });
+        continue;
+      }
+
+      const join = mapJoinEvent(event);
+      if (join) {
+        void handleBotJoinGroup(join.groupId).catch((error) => {
+          logger.error('LINE join event handling failed', {
+            error: error instanceof Error ? error.message : String(error),
+            groupId: join.groupId,
+          });
+        });
+        continue;
+      }
+
       const mapped = mapLineEvent(event);
       if (mapped === null) {
         continue;

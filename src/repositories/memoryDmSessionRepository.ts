@@ -109,6 +109,18 @@ export function createMemoryDmSessionRepository(
       return cloneRecord(record);
     },
 
+    async cancelAllActiveForUser(userId, updatedAt) {
+      let count = 0;
+      for (const record of sessions.values()) {
+        if (record.userId === userId && record.status === 'active') {
+          record.status = 'cancelled';
+          record.updatedAt = updatedAt;
+          count += 1;
+        }
+      }
+      return count;
+    },
+
     async markExpired(sessionId, updatedAt, expiredAt) {
       const record = sessions.get(sessionId);
       if (!record) {

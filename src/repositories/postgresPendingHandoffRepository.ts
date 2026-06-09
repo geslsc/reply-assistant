@@ -140,6 +140,27 @@ export function createPostgresPendingHandoffRepository(pool: Pool): PendingHando
       return result.rows[0] ? mapPendingHandoffRow(result.rows[0]) : null;
     },
 
+    async findOpenByConsultantAndGroup(consultantId, groupId) {
+      const result = await pool.query(
+        `SELECT * FROM pending_handoffs
+         WHERE consultant_id = $1 AND group_id = $2 AND status = 'open'
+         ORDER BY created_at DESC`,
+        [consultantId, groupId]
+      );
+      return result.rows.map(mapPendingHandoffRow);
+    },
+
+    async transferOpenHandoffs({ fromConsultantId, toConsultantId, groupId }) {
+      const now = new Date().toISOString();
+      const result = await pool.query(
+        `UPDATE pending_handoffs
+         SET consultant_id = $3, updated_at = $4
+         WHERE consultant_id = $1 AND group_id = $2 AND status = 'open'`,
+        [fromConsultantId, groupId, toConsultantId, now]
+      );
+      return result.rowCount ?? 0;
+    },
+
     async clear() {
       await pool.query('DELETE FROM pending_handoffs');
     },

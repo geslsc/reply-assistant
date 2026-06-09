@@ -340,6 +340,9 @@ describe('UX fixes 2026-06-09', () => {
 
     it('pushes short reminder when consultant has active dm_session', async () => {
       await handleServiceIntroduction(TEST_GROUP, TEST_CONSULTANT);
+      await getRepos().groupConsultantAssignments.update(TEST_GROUP, {
+        primaryConsultantUserId: TEST_CONSULTANT,
+      });
       await updateGroupFlags(TEST_GROUP, { groupName: '大寶寶測試群' });
       await seedActiveSessionForTest({ userId: TEST_CONSULTANT, card: sampleCard });
       const thread = await createIssueThread(TEST_GROUP, '登入不了');

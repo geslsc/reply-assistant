@@ -1,7 +1,6 @@
 import { Actor, BotReply, EventType, RiskLevel, ThreadState } from '../types';
 import { KnowledgeCard } from '../schemas/knowledgeCardSchema';
 import { createEvent } from './eventLogService';
-import { getActiveAdmins, getActiveConsultants } from './consultantWhitelist';
 import { transitionState } from './stateMachine';
 import { getIssueThread, updateIssueThread } from './issueThreadService';
 import {
@@ -12,6 +11,7 @@ import {
 import { deriveShortCode } from './shortCodeService';
 import { getGroupDisplayName, refreshGroupNameIfNeeded } from './lineGroupSummaryService';
 import { getActiveSession } from './dmSessionService';
+import { logHandoffRouted, resolveHandoffTarget } from './handoffRoutingService';
 
 export interface HandoffDraft {
   questionSummary: string;
@@ -110,11 +110,13 @@ export async function executeHandoff(params: {
     detail: params.reason,
   });
 
-  const notifyTarget = params.notifyTarget ?? 'all_consultants';
-  const recipients =
-    notifyTarget === 'fallback_admin'
-      ? await getActiveAdmins()
-      : await getActiveConsultants();
+  const target = await resolveHandoffTarget(params.groupId);
+  if (!target) {
+    return { replies: [], draft };
+  }
+
+  await logHandoffRouted({ groupId: params.groupId, target });
+
   const thread = await getIssueThread(params.groupId, params.issueThreadId);
   const shortCode = deriveShortCode(
     params.issueThreadId,
@@ -130,29 +132,27 @@ export async function executeHandoff(params: {
     issueThreadId: params.issueThreadId,
     shortCode,
     customerQuestion: params.customerQuestion,
-    consultantIds: recipients.map((recipient) => recipient.userId),
+    consultantIds: [target.userId],
   });
 
   const replies: BotReply[] = [];
-  for (const recipient of recipients) {
-    const activeSession = await getActiveSession(recipient.userId);
-    const text = activeSession
-      ? buildHandoffShortReminder({
-          groupId: params.groupId,
-          groupName,
-          shortCode,
-        })
-      : formatHandoffMessage(draft, {
-          groupId: params.groupId,
-          groupName,
-          shortCode,
-        });
-    replies.push({
-      type: 'push',
-      userId: recipient.userId,
-      text,
-    });
-  }
+  const activeSession = await getActiveSession(target.userId);
+  const text = activeSession
+    ? buildHandoffShortReminder({
+        groupId: params.groupId,
+        groupName,
+        shortCode,
+      })
+    : formatHandoffMessage(draft, {
+        groupId: params.groupId,
+        groupName,
+        shortCode,
+      });
+  replies.push({
+    type: 'push',
+    userId: target.userId,
+    text,
+  });
 
   return { replies, draft };
 }

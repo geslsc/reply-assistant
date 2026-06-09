@@ -66,6 +66,7 @@ export interface DmSessionRepository {
   markCompleted(sessionId: string, updatedAt: string): Promise<DmSessionRecord | null>;
   markCancelled(sessionId: string, updatedAt: string): Promise<DmSessionRecord | null>;
   markExpired(sessionId: string, updatedAt: string, expiredAt: string): Promise<DmSessionRecord | null>;
+  cancelAllActiveForUser(userId: string, updatedAt: string): Promise<number>;
   submitDraftAtomically(params: {
     userId: string;
     reviewId: string;

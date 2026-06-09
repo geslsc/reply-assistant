@@ -19,6 +19,7 @@ export interface AppEnv {
   KNOWLEDGE_EXPORT_REMINDER_DAYS: number;
   DM_SESSION_TIMEOUT_HOURS: number;
   DEBOUNCE_SECONDS: number;
+  OFFICIAL_LINE_URL: string | null;
 }
 
 let cachedEnv: AppEnv | null = null;
@@ -64,6 +65,7 @@ export function loadEnv(overrides: Partial<AppEnv> = {}): AppEnv {
       overrides.DM_SESSION_TIMEOUT_HOURS ?? Number(process.env.DM_SESSION_TIMEOUT_HOURS ?? 24),
     DEBOUNCE_SECONDS:
       overrides.DEBOUNCE_SECONDS ?? Number(process.env.DEBOUNCE_SECONDS ?? 60),
+    OFFICIAL_LINE_URL: overrides.OFFICIAL_LINE_URL ?? process.env.OFFICIAL_LINE_URL ?? null,
   };
   return cachedEnv;
 }

@@ -1,4 +1,4 @@
-import { BotReply, ConsultantStatus } from '../types';
+import { BotReply } from '../types';
 import {
   classifyConsultantIntent,
   ConsultantIntent,
@@ -7,6 +7,7 @@ import {
   requiresConfirmation,
 } from './consultantIntentClassifier';
 import { isConfirmationPhrase } from './consultantConfirmationService';
+import { getRepos } from '../repositories';
 import {
   getConsultant,
   isActiveConsultantOrAdmin,
@@ -86,12 +87,19 @@ export async function buildInactiveWorkflowBlockReply(
   }
 
   const record = await getConsultant(userId);
-  const status = record?.status ?? ConsultantStatus.PENDING;
+  let statusLabel: string;
+  if (record) {
+    statusLabel = record.status;
+  } else {
+    const pendingApplication =
+      await getRepos().consultantApplications.findPendingByUserId(userId);
+    statusLabel = pendingApplication ? 'pending（申請審核中）' : '未註冊';
+  }
   return [
     {
       type: 'push',
       userId,
-      text: `您目前身份（${status}）不可使用此顧問功能。`,
+      text: `您目前身份（${statusLabel}）不可使用此顧問功能。`,
     },
   ];
 }

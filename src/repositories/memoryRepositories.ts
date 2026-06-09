@@ -26,6 +26,8 @@ import { createMemoryPendingHandoffRepository } from './memoryPendingHandoffRepo
 import { createMemoryKnowledgeCardRepository } from './memoryKnowledgeCardRepository';
 import { createMemoryPendingKnowledgeReviewRepository } from './memoryPendingKnowledgeReviewRepository';
 import { createMemoryDmSessionRepository } from './memoryDmSessionRepository';
+import { createMemoryConsultantApplicationRepository } from './memoryConsultantApplicationRepository';
+import { createMemoryGroupConsultantAssignmentRepository } from './memoryGroupConsultantAssignmentRepository';
 import { createMemoryGroupMessageBufferRepository } from './memoryGroupMessageBufferRepository';
 
 const VALID_EVENT_TYPES = new Set(Object.values(EventType));
@@ -44,6 +46,8 @@ function defaultGroupFlags(groupId: string): GroupFlags {
     serviceEndAt: null,
     activeIssueThreadId: null,
     serviceReactivationPending: false,
+    botLeftAt: null,
+    servicePeriodEndNotified: false,
   };
 }
 
@@ -177,13 +181,20 @@ export function createMemoryRepositories(): Repositories {
 
   const consultantRepo: ConsultantRepository = {
     async upsertAdmin(userId, displayName) {
+      const now = new Date().toISOString();
       const record: ConsultantRecord = {
         userId,
         role: ConsultantRole.ADMIN,
         status: ConsultantStatus.ACTIVE,
         inviteCode: null,
         displayName: displayName ?? null,
-        createdAt: new Date().toISOString(),
+        consultantCode: null,
+        createdAt: now,
+        updatedAt: now,
+        approvedBy: null,
+        approvedAt: null,
+        disabledBy: null,
+        disabledAt: null,
       };
       consultants.set(userId, record);
       return { ...record };
@@ -195,13 +206,20 @@ export function createMemoryRepositories(): Repositories {
       return inviteCodes.has(code.toUpperCase());
     },
     async requestJoin(userId, inviteCode, displayName) {
+      const now = new Date().toISOString();
       const record: ConsultantRecord = {
         userId,
         role: ConsultantRole.CONSULTANT,
-        status: ConsultantStatus.PENDING,
+        status: ConsultantStatus.DISABLED,
         inviteCode: inviteCode.toUpperCase(),
         displayName: displayName ?? null,
-        createdAt: new Date().toISOString(),
+        consultantCode: null,
+        createdAt: now,
+        updatedAt: now,
+        approvedBy: null,
+        approvedAt: null,
+        disabledBy: null,
+        disabledAt: null,
       };
       consultants.set(userId, record);
       return { ...record };
@@ -212,13 +230,20 @@ export function createMemoryRepositories(): Repositories {
         return { success: false, message: '只有 active admin 可核准' };
       }
       const record = consultants.get(targetUserId);
-      if (!record || record.status !== ConsultantStatus.PENDING) {
-        return { success: false, message: '找不到 pending 顧問' };
+      if (!record) {
+        return { success: false, message: '找不到顧問' };
       }
+      const now = new Date().toISOString();
       record.status = ConsultantStatus.ACTIVE;
+      record.approvedBy = adminUserId;
+      record.approvedAt = now;
+      record.updatedAt = now;
+      if (!record.consultantCode) {
+        record.consultantCode = `C-legacy-${targetUserId.slice(-4)}`;
+      }
       return { success: true, message: '已核准' };
     },
-    async disable(adminUserId, targetUserId) {
+    async disable(adminUserId, targetUserId, disabledBy) {
       const admin = consultants.get(adminUserId);
       if (!admin || admin.status !== ConsultantStatus.ACTIVE || admin.role !== ConsultantRole.ADMIN) {
         return { success: false, message: '只有 active admin 可停用' };
@@ -227,12 +252,61 @@ export function createMemoryRepositories(): Repositories {
       if (!record) {
         return { success: false, message: '找不到顧問' };
       }
+      const now = new Date().toISOString();
       record.status = ConsultantStatus.DISABLED;
+      record.disabledBy = disabledBy ?? adminUserId;
+      record.disabledAt = now;
+      record.updatedAt = now;
       return { success: true, message: '已停用' };
+    },
+    async enable(adminUserId, targetUserId) {
+      const admin = consultants.get(adminUserId);
+      if (!admin || admin.status !== ConsultantStatus.ACTIVE || admin.role !== ConsultantRole.ADMIN) {
+        return { success: false, message: '只有 active admin 可啟用' };
+      }
+      const record = consultants.get(targetUserId);
+      if (!record) {
+        return { success: false, message: '找不到顧問' };
+      }
+      const now = new Date().toISOString();
+      record.status = ConsultantStatus.ACTIVE;
+      record.disabledBy = null;
+      record.disabledAt = null;
+      record.updatedAt = now;
+      return { success: true, message: '已啟用' };
+    },
+    async upsertApprovedConsultant(params) {
+      const existing = consultants.get(params.userId);
+      const now = params.approvedAt;
+      const record: ConsultantRecord = {
+        userId: params.userId,
+        role: ConsultantRole.CONSULTANT,
+        status: ConsultantStatus.ACTIVE,
+        inviteCode: existing?.inviteCode ?? null,
+        displayName: params.displayName,
+        consultantCode: params.consultantCode,
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+        approvedBy: params.approvedBy,
+        approvedAt: params.approvedAt,
+        disabledBy: null,
+        disabledAt: null,
+      };
+      consultants.set(params.userId, record);
+      return { ...record };
     },
     async findById(userId) {
       const record = consultants.get(userId);
       return record ? { ...record } : null;
+    },
+    async findByConsultantCode(consultantCode) {
+      const record = Array.from(consultants.values()).find(
+        (item) => item.consultantCode === consultantCode
+      );
+      return record ? { ...record } : null;
+    },
+    async findAll() {
+      return Array.from(consultants.values()).map((item) => ({ ...item }));
     },
     async findActive() {
       return Array.from(consultants.values()).filter(
@@ -242,9 +316,7 @@ export function createMemoryRepositories(): Repositories {
       );
     },
     async findPending() {
-      return Array.from(consultants.values()).filter(
-        (c) => c.status === ConsultantStatus.PENDING
-      );
+      return [];
     },
     async findActiveAdmins() {
       return Array.from(consultants.values()).filter(
@@ -313,5 +385,7 @@ export function createMemoryRepositories(): Repositories {
     pendingKnowledgeReviews,
     dmSessions,
     groupMessageBuffers: createMemoryGroupMessageBufferRepository(),
+    consultantApplications: createMemoryConsultantApplicationRepository(),
+    groupConsultantAssignments: createMemoryGroupConsultantAssignmentRepository(),
   };
 }

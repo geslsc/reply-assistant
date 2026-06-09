@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS group_flags (
   service_end_at TIMESTAMPTZ,
   active_issue_thread_id TEXT,
   service_reactivation_pending BOOLEAN NOT NULL DEFAULT FALSE,
+  bot_left_at TIMESTAMPTZ,
+  service_period_end_notified BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -108,15 +110,76 @@ CREATE TABLE IF NOT EXISTS consultants (
   status TEXT NOT NULL,
   invite_code TEXT,
   display_name TEXT,
+  consultant_code TEXT UNIQUE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   approved_by TEXT,
   approved_at TIMESTAMPTZ,
+  disabled_by TEXT,
   disabled_at TIMESTAMPTZ,
   last_knowledge_export_at TIMESTAMPTZ,
   CONSTRAINT consultants_role_check CHECK (role IN ('admin', 'consultant')),
-  CONSTRAINT consultants_status_check CHECK (status IN ('pending', 'active', 'disabled'))
+  CONSTRAINT consultants_status_check CHECK (status IN ('active', 'disabled'))
 );
+
+ALTER TABLE consultants ADD COLUMN IF NOT EXISTS consultant_code TEXT;
+ALTER TABLE consultants ADD COLUMN IF NOT EXISTS disabled_by TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_consultants_consultant_code
+  ON consultants(consultant_code) WHERE consultant_code IS NOT NULL;
+ALTER TABLE consultants DROP CONSTRAINT IF EXISTS consultants_status_check;
+ALTER TABLE consultants ADD CONSTRAINT consultants_status_check CHECK (status IN ('active', 'disabled'));
+ALTER TABLE group_flags ADD COLUMN IF NOT EXISTS bot_left_at TIMESTAMPTZ;
+ALTER TABLE group_flags ADD COLUMN IF NOT EXISTS service_period_end_notified BOOLEAN NOT NULL DEFAULT FALSE;
+
+CREATE TABLE IF NOT EXISTS consultant_applications (
+  application_id TEXT PRIMARY KEY,
+  application_code TEXT UNIQUE NOT NULL,
+  user_id TEXT NOT NULL,
+  display_name TEXT,
+  status TEXT NOT NULL,
+  applied_at TIMESTAMPTZ NOT NULL,
+  resolved_at TIMESTAMPTZ,
+  resolved_by TEXT,
+  admin_response TEXT,
+  CONSTRAINT consultant_applications_status_check CHECK (
+    status IN ('pending', 'approved', 'rejected')
+  )
+);
+
+CREATE INDEX IF NOT EXISTS idx_consultant_applications_status ON consultant_applications(status);
+CREATE INDEX IF NOT EXISTS idx_consultant_applications_user_id ON consultant_applications(user_id);
+
+-- pending_handoffs：僅用於私訊代回群組流程，不得作知識卡草稿儲存區
+CREATE TABLE IF NOT EXISTS pending_handoffs (
+  id TEXT PRIMARY KEY,
+  consultant_id TEXT NOT NULL,
+  issue_thread_id TEXT NOT NULL,
+  group_id TEXT NOT NULL,
+  short_code TEXT NOT NULL,
+  status TEXT NOT NULL,
+  invalid_reason TEXT,
+  customer_question TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  closed_at TIMESTAMPTZ,
+  snoozed BOOLEAN NOT NULL DEFAULT FALSE,
+  acknowledged_at TIMESTAMPTZ,
+  CONSTRAINT pending_handoffs_status_check CHECK (
+    status IN ('open', 'closed', 'invalid')
+  ),
+  CONSTRAINT pending_handoffs_invalid_reason_check CHECK (
+    invalid_reason IS NULL OR invalid_reason IN (
+      'passive_timeout',
+      'group_muted',
+      'service_ended',
+      'out_of_service'
+    )
+  )
+);
+
+CREATE INDEX IF NOT EXISTS idx_pending_handoffs_consultant ON pending_handoffs(consultant_id);
+CREATE INDEX IF NOT EXISTS idx_pending_handoffs_short_code ON pending_handoffs(short_code);
+CREATE INDEX IF NOT EXISTS idx_pending_handoffs_group ON pending_handoffs(group_id);
 
 ALTER TABLE consultants ADD COLUMN IF NOT EXISTS last_knowledge_export_at TIMESTAMPTZ;
 ALTER TABLE group_flags ADD COLUMN IF NOT EXISTS group_name TEXT;
@@ -164,38 +227,6 @@ CREATE TABLE IF NOT EXISTS knowledge_overrides (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CONSTRAINT knowledge_overrides_status_check CHECK (status_override IN ('暫停'))
 );
-
--- pending_handoffs：僅用於私訊代回群組流程，不得作知識卡草稿儲存區
-CREATE TABLE IF NOT EXISTS pending_handoffs (
-  id TEXT PRIMARY KEY,
-  consultant_id TEXT NOT NULL,
-  issue_thread_id TEXT NOT NULL,
-  group_id TEXT NOT NULL,
-  short_code TEXT NOT NULL,
-  status TEXT NOT NULL,
-  invalid_reason TEXT,
-  customer_question TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  closed_at TIMESTAMPTZ,
-  snoozed BOOLEAN NOT NULL DEFAULT FALSE,
-  acknowledged_at TIMESTAMPTZ,
-  CONSTRAINT pending_handoffs_status_check CHECK (
-    status IN ('open', 'closed', 'invalid')
-  ),
-  CONSTRAINT pending_handoffs_invalid_reason_check CHECK (
-    invalid_reason IS NULL OR invalid_reason IN (
-      'passive_timeout',
-      'group_muted',
-      'service_ended',
-      'out_of_service'
-    )
-  )
-);
-
-CREATE INDEX IF NOT EXISTS idx_pending_handoffs_consultant ON pending_handoffs(consultant_id);
-CREATE INDEX IF NOT EXISTS idx_pending_handoffs_short_code ON pending_handoffs(short_code);
-CREATE INDEX IF NOT EXISTS idx_pending_handoffs_group ON pending_handoffs(group_id);
 
 -- pending_knowledge_reviews：僅用於顧問送審 → admin 審核，不得作其他用途
 CREATE TABLE IF NOT EXISTS pending_knowledge_reviews (
@@ -259,3 +290,29 @@ CREATE INDEX IF NOT EXISTS idx_group_message_buffers_group_customer_collecting
 CREATE INDEX IF NOT EXISTS idx_group_message_buffers_collecting_updated
   ON group_message_buffers(status, updated_at)
   WHERE status = 'collecting';
+
+-- group_consultant_assignments：群組與負責顧問綁定（主負責 / 副手）
+CREATE TABLE IF NOT EXISTS group_consultant_assignments (
+  id SERIAL PRIMARY KEY,
+  group_id TEXT NOT NULL UNIQUE,
+  group_code TEXT UNIQUE NOT NULL,
+  group_name TEXT,
+  primary_consultant_user_id TEXT,
+  secondary_consultant_user_id TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_by TEXT,
+  last_consultant_action_at TIMESTAMPTZ,
+  last_customer_message_at TIMESTAMPTZ,
+  CONSTRAINT group_consultant_assignments_status_check CHECK (
+    status IN ('active', 'left')
+  )
+);
+
+CREATE INDEX IF NOT EXISTS idx_group_consultant_assignments_primary
+  ON group_consultant_assignments(primary_consultant_user_id);
+CREATE INDEX IF NOT EXISTS idx_group_consultant_assignments_secondary
+  ON group_consultant_assignments(secondary_consultant_user_id);
+CREATE INDEX IF NOT EXISTS idx_group_consultant_assignments_group_code
+  ON group_consultant_assignments(group_code);

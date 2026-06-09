@@ -5,6 +5,7 @@ import {
   ConsultantStatus,
 } from '../types';
 import { getRepos } from '../repositories';
+import { allocateApplicationCode } from './consultantCodeService';
 
 export function generateInviteCode(): string {
   return uuidv4().slice(0, 8).toUpperCase();
@@ -14,28 +15,45 @@ export async function registerInviteCode(code: string, createdByAdminId: string)
   await getRepos().consultants.registerInviteCode(code, createdByAdminId);
 }
 
-export async function requestConsultantJoin(
-  userId: string,
-  inviteCode: string,
-  displayName?: string
-): Promise<{ success: boolean; message: string; record?: ConsultantRecord }> {
+export async function validateConsultantInvite(
+  inviteCode: string
+): Promise<{ success: boolean; message: string }> {
   const code = inviteCode.trim().toUpperCase();
   const valid = await getRepos().consultants.isValidInviteCode(code);
   if (!valid) {
     return { success: false, message: '邀請碼無效' };
   }
+  return { success: true, message: '邀請碼有效' };
+}
+
+export async function requestConsultantJoin(
+  userId: string,
+  inviteCode: string,
+  displayName?: string
+): Promise<{ success: boolean; message: string; record?: ConsultantRecord }> {
+  const validated = await validateConsultantInvite(inviteCode);
+  if (!validated.success) {
+    return validated;
+  }
 
   const existing = await getRepos().consultants.findById(userId);
-  if (existing && existing.status === ConsultantStatus.ACTIVE) {
+  if (existing?.status === ConsultantStatus.ACTIVE) {
     return { success: false, message: '您已是 active 顧問' };
   }
 
-  const record = await getRepos().consultants.requestJoin(userId, code, displayName);
-  return {
-    success: true,
-    message: '已建立 pending consultant，等待 admin 核准',
-    record,
-  };
+  const pending = await getRepos().consultantApplications.findPendingByUserId(userId);
+  if (!pending) {
+    const applicationCode = await allocateApplicationCode();
+    await getRepos().consultantApplications.create({
+      applicationId: uuidv4(),
+      applicationCode,
+      userId,
+      displayName: displayName ?? null,
+      appliedAt: new Date().toISOString(),
+    });
+  }
+
+  return { success: true, message: '已建立顧問申請，等待 admin 核准' };
 }
 
 export async function approveConsultant(
@@ -45,7 +63,35 @@ export async function approveConsultant(
   if (!(await isActiveAdmin(adminUserId))) {
     return { success: false, message: '只有 active admin 可核准' };
   }
-  return getRepos().consultants.approve(adminUserId, targetUserId);
+  const pending = await getRepos().consultantApplications.findPendingByUserId(targetUserId);
+  if (pending) {
+    const resolvedAt = new Date().toISOString();
+    const application = await getRepos().consultantApplications.approve({
+      applicationCode: pending.applicationCode,
+      resolvedBy: adminUserId,
+      resolvedAt,
+    });
+    if (!application) {
+      return { success: false, message: '找不到 pending 申請' };
+    }
+    await getRepos().consultants.upsertApprovedConsultant({
+      userId: application.userId,
+      displayName: application.displayName,
+      consultantCode: application.applicationCode,
+      approvedBy: adminUserId,
+      approvedAt: resolvedAt,
+    });
+    return { success: true, message: '已核准' };
+  }
+  const consultantCode = await allocateApplicationCode();
+  await getRepos().consultants.upsertApprovedConsultant({
+    userId: targetUserId,
+    displayName: null,
+    consultantCode,
+    approvedBy: adminUserId,
+    approvedAt: new Date().toISOString(),
+  });
+  return { success: true, message: '已核准' };
 }
 
 export async function disableConsultant(
@@ -55,7 +101,7 @@ export async function disableConsultant(
   if (!(await isActiveAdmin(adminUserId))) {
     return { success: false, message: '只有 active admin 可停用' };
   }
-  return getRepos().consultants.disable(adminUserId, targetUserId);
+  return getRepos().consultants.disable(adminUserId, targetUserId, adminUserId);
 }
 
 export async function registerAdmin(userId: string, displayName?: string): Promise<ConsultantRecord> {
@@ -67,12 +113,17 @@ export async function getConsultant(userId: string): Promise<ConsultantRecord | 
   return record ?? undefined;
 }
 
+/** consultant-only 權限單一入口（不含 admin） */
 export async function isActiveConsultant(userId: string): Promise<boolean> {
+  return isActiveConsultantRole(userId);
+}
+
+export async function isActiveConsultantRole(userId: string): Promise<boolean> {
   const record = await getRepos().consultants.findById(userId);
   return (
     !!record &&
     record.status === ConsultantStatus.ACTIVE &&
-    (record.role === ConsultantRole.CONSULTANT || record.role === ConsultantRole.ADMIN)
+    record.role === ConsultantRole.CONSULTANT
   );
 }
 
@@ -86,7 +137,16 @@ export async function isActiveAdmin(userId: string): Promise<boolean> {
 }
 
 export async function isActiveConsultantOrAdmin(userId: string): Promise<boolean> {
-  return isActiveConsultant(userId);
+  return (await isActiveConsultantRole(userId)) || (await isActiveAdmin(userId));
+}
+
+export async function isDisabledConsultant(userId: string): Promise<boolean> {
+  const record = await getRepos().consultants.findById(userId);
+  return (
+    !!record &&
+    record.status === ConsultantStatus.DISABLED &&
+    record.role === ConsultantRole.CONSULTANT
+  );
 }
 
 export async function getPendingConsultants(): Promise<ConsultantRecord[]> {

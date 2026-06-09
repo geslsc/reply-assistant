@@ -13,6 +13,7 @@ import {
   isActiveAdmin,
   isActiveConsultantOrAdmin,
   requestConsultantJoin,
+  validateConsultantInvite,
 } from '../services/consultantWhitelist';
 import { getEventLogs, logStateTransition } from '../services/eventLogService';
 import { getGroupFlags, isMuted } from '../services/groupFlags';
@@ -70,6 +71,22 @@ import {
   handleServiceReactivationDirect,
   isOutOfService,
 } from '../services/servicePeriodService';
+import { handleApplyConsultant, APPLY_CONSULTANT_PHRASE, approveApplicationByCode } from '../services/consultantApplicationService';
+import { getRepos } from '../repositories';
+import { handleConsultantManagementCommand } from '../services/consultantManagementService';
+import {
+  handleGroupAdminCommand,
+  rejectConsultantGroupList,
+} from '../services/groupConsultantAdminService';
+import { handleMyServiceGroups, MY_SERVICE_GROUPS_PHRASE } from '../services/consultantServiceGroupsService';
+import {
+  ensureGroupAssignment,
+  handleGroupConsultantSideEffects,
+  isValidGroupAssistantCommand,
+  updateLastCustomerMessageAt,
+} from '../services/groupConsultantAssignmentService';
+import { handleDisabledConsultantGroupCommand } from '../services/disabledConsultantGroupService';
+import { maybeSendServicePeriodEndedMessage } from '../services/servicePeriodEndMessageService';
 import { refreshGroupNameIfNeeded } from '../services/lineGroupSummaryService';
 
 export interface IncomingMessage {
@@ -200,31 +217,45 @@ async function handlePrivateMessage(message: IncomingMessage): Promise<BotReply[
 
   logger.info('LINE private message received', { userId: message.userId, text });
 
+  if (text === APPLY_CONSULTANT_PHRASE) {
+    return handleApplyConsultant({ userId: message.userId });
+  }
+
+  const managementReplies = await handleConsultantManagementCommand(message.userId, text);
+  if (managementReplies) {
+    return managementReplies;
+  }
+
+  const groupListReject = await rejectConsultantGroupList(message.userId, text);
+  if (groupListReject) {
+    return groupListReject;
+  }
+
+  const groupAdminReplies = await handleGroupAdminCommand(message.userId, text);
+  if (groupAdminReplies) {
+    return groupAdminReplies;
+  }
+
+  if (text === MY_SERVICE_GROUPS_PHRASE) {
+    const serviceGroupReplies = await handleMyServiceGroups(message.userId);
+    return serviceGroupReplies ?? [];
+  }
+
   const joinMatch = text.match(CONSULTANT_JOIN_PATTERN);
   if (joinMatch) {
-    const result = await requestConsultantJoin(message.userId, joinMatch[1]);
-    replies.push({ type: 'push', userId: message.userId, text: result.message });
-    if (result.success) {
-      const admins = await getActiveAdmins();
-      if (admins.length > 0) {
-        for (const admin of admins) {
-          replies.push({
-            type: 'push',
-            userId: admin.userId,
-            text: `【待核准顧問】userId: ${message.userId}\n請私訊「核准顧問 ${message.userId}」`,
-          });
-        }
-      } else {
-        logger.warn('Pending consultant created but no active admin to notify', {
-          userId: message.userId,
-        });
-      }
+    const validated = await validateConsultantInvite(joinMatch[1]);
+    if (!validated.success) {
+      return [{ type: 'push', userId: message.userId, text: validated.message }];
     }
-    return replies;
+    return handleApplyConsultant({ userId: message.userId });
   }
 
   const approveMatch = text.match(APPROVE_CONSULTANT_PATTERN);
   if (approveMatch) {
+    const pending = await getRepos().consultantApplications.findPendingByUserId(approveMatch[1]);
+    if (pending) {
+      return approveApplicationByCode(message.userId, pending.applicationCode);
+    }
     const result = await approveConsultant(message.userId, approveMatch[1]);
     replies.push({ type: 'push', userId: message.userId, text: result.message });
     if (result.success) {
@@ -363,10 +394,21 @@ export async function processMessage(message: IncomingMessage): Promise<ProcessR
 
   const groupId = message.groupId!;
   await refreshGroupNameIfNeeded(groupId);
+  await ensureGroupAssignment(groupId);
   await settleGroupTimeouts(groupId);
   replies.push(...(await settleExpiredGroupBuffers(groupId)));
+  replies.push(...(await maybeSendServicePeriodEndedMessage(groupId)));
 
   const text = message.text.trim();
+  const disabledCommandReplies = await handleDisabledConsultantGroupCommand({
+    userId: message.userId,
+    groupId,
+    text,
+  });
+  if (disabledCommandReplies) {
+    return { replies: disabledCommandReplies, events: await getEventLogs() };
+  }
+
   const isConsultant = await isActiveConsultantOrAdmin(message.userId);
 
   if (isConsultant) {
@@ -386,24 +428,37 @@ export async function processMessage(message: IncomingMessage): Promise<ProcessR
       return { replies, events: await getEventLogs() };
     }
 
+    const sideEffectReplies = isValidGroupAssistantCommand(text)
+      ? await handleGroupConsultantSideEffects({
+          groupId,
+          userId: message.userId,
+          text,
+        })
+      : [];
+
     if (text === GROUP_ASSISTANT_COMMANDS.INTRO) {
       replies.push(...(await handleServiceIntroduction(groupId, message.userId)));
+      replies.push(...sideEffectReplies);
       return { replies, events: await getEventLogs() };
     }
     if (text === GROUP_ASSISTANT_COMMANDS.MUTE) {
       replies.push(...(await handleConsultantMute(groupId, message.userId, true)));
+      replies.push(...sideEffectReplies);
       return { replies, events: await getEventLogs() };
     }
     if (text === GROUP_ASSISTANT_COMMANDS.UNMUTE) {
       replies.push(...(await handleConsultantMute(groupId, message.userId, false)));
+      replies.push(...sideEffectReplies);
       return { replies, events: await getEventLogs() };
     }
     if (text === GROUP_ASSISTANT_COMMANDS.REACTIVATE) {
       replies.push(...(await handleServiceReactivationDirect(groupId, message.userId)));
+      replies.push(...sideEffectReplies);
       return { replies, events: await getEventLogs() };
     }
     if (text === GROUP_ASSISTANT_COMMANDS.CORRECTION) {
       replies.push(...(await handleAssistantCorrection(groupId, message.userId)));
+      replies.push(...sideEffectReplies);
       return { replies, events: await getEventLogs() };
     }
 
@@ -429,10 +484,13 @@ export async function processMessage(message: IncomingMessage): Promise<ProcessR
   }
 
   replies.push(
-    ...(await handleCustomerQuestion(groupId, message.userId, text, {
-      messageId: message.replyToken,
-      timestamp: message.timestamp,
-    }))
+    ...(await (async () => {
+      await updateLastCustomerMessageAt(groupId);
+      return handleCustomerQuestion(groupId, message.userId, text, {
+        messageId: message.replyToken,
+        timestamp: message.timestamp,
+      });
+    })())
   );
 
   return { replies, events: await getEventLogs() };

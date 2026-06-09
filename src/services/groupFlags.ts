@@ -13,6 +13,8 @@ function defaultFlags(groupId: string): GroupFlags {
     serviceEndAt: null,
     activeIssueThreadId: null,
     serviceReactivationPending: false,
+    botLeftAt: null,
+    servicePeriodEndNotified: false,
   };
 }
 

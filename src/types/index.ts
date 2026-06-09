@@ -40,7 +40,6 @@ export enum ConsultantRole {
 }
 
 export enum ConsultantStatus {
-  PENDING = 'pending',
   ACTIVE = 'active',
   DISABLED = 'disabled',
 }
@@ -78,6 +77,8 @@ export interface GroupFlags {
   serviceEndAt: string | null;
   activeIssueThreadId: string | null;
   serviceReactivationPending: boolean;
+  botLeftAt: string | null;
+  servicePeriodEndNotified: boolean;
 }
 
 export interface IssueThread {
@@ -102,7 +103,13 @@ export interface ConsultantRecord {
   status: ConsultantStatus;
   inviteCode: string | null;
   displayName: string | null;
+  consultantCode: string | null;
   createdAt: string;
+  updatedAt?: string | null;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  disabledBy: string | null;
+  disabledAt: string | null;
   lastKnowledgeExportAt?: string | null;
 }
 

@@ -49,6 +49,92 @@ npm start
 | `KNOWLEDGE_EXPORT_REMINDER_DAYS` | admin 私訊被動備份提醒天數，預設 `7` |
 | `DM_SESSION_TIMEOUT_HOURS` | 私訊草稿 session 被動過期小時數，預設 `24`（無 cron，每次私訊檢查） |
 | `DEBOUNCE_SECONDS` | 群組店家訊息收斂 debounce 秒數，預設 `60`（允許 `setTimeout` 短時 debounce；buffer 存 DB，重啟後由下一個群組事件補結算） |
+| `OFFICIAL_LINE_URL` | **選填**。官方客服 LINE 好友連結；用於顧問停用兜底話術與服務期結束話術。缺少時話術仍會發出，但不附連結 |
+
+## 顧問申請與管理（批次一）
+
+### consultant_applications 表
+
+僅保存顧問申請紀錄（`pending` / `approved` / `rejected`），與 `consultants` 表分離。`consultants.status` 僅允許 `active` / `disabled`，不含 `pending`。
+
+### 申請流程
+
+- 一般使用者私訊「申請顧問」→ 建立 `consultant_applications`（pending）→ 通知 active admin
+- 已是 active consultant / admin 者不重複建申請
+
+### 核准 / 拒絕
+
+- Admin 私訊「核准 C-xxxx」→ application approved → `consultants` 建立 active 顧問（含 `consultant_code`）
+- Admin 私訊「拒絕 C-xxxx」→ application rejected → 通知申請者（不揭露內部原因）
+
+### 顧問管理指令（僅 active admin）
+
+- `顧問名單` / `查詢待審顧問`
+- `停用 C-xx` 或 `停用 [userId]` → 即時停用 + 自動分類清理
+- `啟用 C-xx` 或 `啟用 [userId]`
+- 不可停用最後一位 active admin
+
+### 停用時自動分類
+
+1. `dm_sessions` active 草稿 → 標記 `cancelled`
+2. `pending_knowledge_reviews` 已送審 → 保留，admin 可繼續審核
+3. 顧問相關群組（批次一過渡：以 `pending_handoffs` 關聯群組為資料來源）：
+   - 小助手已離群（`group_flags.bot_left_at`）→ 不處理
+   - 仍在 + 服務期內 → 發兜底話術 + 暫停群組
+   - 仍在 + 服務期已結束 → 不發兜底話術
+
+### Bot leave event
+
+LINE `leave` event → 寫入 `group_flags.bot_left_at` → 私訊通知 admin
+
+### 服務期結束話術
+
+下一則群組訊息進來時，若 `serviceEndAt` 已過且尚未通知（`service_period_end_notified`），發送固定結束話術（非 LLM 生成）。
+
+### 顧問自查
+
+Active consultant 私訊「我的服務群組」→ 列出自己作為主負責或副手的群組（資料來源：`group_consultant_assignments`）。
+
+## 群組負責顧問綁定與 handoff 路由（批次二）
+
+### group_consultant_assignments 表
+
+保存群組與負責顧問綁定：`group_id`（唯一）、`group_code`（G-01 / G-02…）、`primary_consultant_user_id`、`secondary_consultant_user_id`、`status`（active / left）、`last_consultant_action_at`、`last_customer_message_at`。
+
+### 新群組偵測
+
+- LINE join event 或首次收到群組訊息時自動建立記錄
+- 自動分配 `group_code`（G-01、G-02…）
+- `group_name` 嘗試從 LINE Group Summary API 取得；失敗時顯示 `尚未取得群組名稱（groupId: xxx）`
+
+### 自動綁定主負責
+
+- active consultant / active admin 在群組使用「小助手」開頭的有效顧問語法，且該群尚無主負責 → 自動設為 primary
+- 同群已有主負責、另一位顧問使用「小助手」語法 → 不覆蓋，通知 admin
+- 一般發話不觸發綁定
+
+### admin 也可作為主負責 / 副手
+
+active admin 綁定規則與 consultant 相同；handoff 若 admin 是主負責，走 primary 路徑。
+
+### admin 指派指令（僅 active admin）
+
+- `設定群組 G-01 主負責 C-01`
+- `設定群組 G-01 主負責 C-01 副手 C-02`
+- `解除群組 G-01 負責人`
+- `群組清單` / `群組 G-01 狀態` / `XX美甲店 狀態`（名稱重複時回候選清單）
+
+### 我的服務群組
+
+active admin / active consultant 私訊「我的服務群組」→ 列出自己作為 primary 或 secondary 的群組。
+
+### handoff 路由
+
+`resolveHandoffTarget(groupId)` 單一入口，順序：主負責 → 副手 → fallback admin。`pending_handoffs` 只為實際被通知的人建立。
+
+### 停用顧問 handoff 轉移
+
+停用主負責時，該群 open `pending_handoffs` 轉給 active 副手；無副手則轉給 fallback admin。
 
 ## 群組訊息收斂與語意分流
 
@@ -57,7 +143,7 @@ npm start
 1. **收斂 buffer（DB）**：同一 `group_id + customer_user_id` 的連續訊息 append 到 `group_message_buffers`，不拆成多筆問題。
 2. **Debounce**：預設 `DEBOUNCE_SECONDS=60`；60 秒內再發話會重設計時器。高風險關鍵字（帳務 / 金流 / 權限 / 資料異常等）則立即收斂。
 3. **重啟補結算**：Railway 重啟導致 `setTimeout` 消失時，下一個群組事件會檢查 `status=collecting` 且已逾 debounce 窗的 buffer 並補做收斂。
-4. **顧問插話**：顧問 / admin 在群組發話時，立即 flush 收斂中的店家 buffer 並處理，顧問訊息本身不視為店家問題。
+4. **顧問一般發話**：active 顧問 / admin 在群組一般回覆時，小助手視為人工接手並保持沉默，不 flush 店家 buffer。
 5. **LLM 語意分流**（僅挑卡 + 清晰度，不生成公開答案）：
    - 意圖清楚 + 低風險可公開卡 → 逐字 `standard_answer` + 固定收尾句
    - 中高風險 / 不可公開 / 無對應卡 → 固定緩衝話術 + 通知 fallback admin（僅 active admin，不通知所有 active consultants）

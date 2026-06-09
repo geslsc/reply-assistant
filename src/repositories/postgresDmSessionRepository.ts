@@ -93,6 +93,15 @@ export function createPostgresDmSessionRepository(pool: Pool): DmSessionReposito
       return result.rows[0] ? mapRow(result.rows[0]) : null;
     },
 
+    async cancelAllActiveForUser(userId, updatedAt) {
+      const result = await pool.query(
+        `UPDATE dm_sessions SET status = 'cancelled', updated_at = $2
+         WHERE user_id = $1 AND status = 'active'`,
+        [userId, updatedAt]
+      );
+      return result.rowCount ?? 0;
+    },
+
     async markExpired(sessionId, updatedAt, expiredAt) {
       const result = await pool.query(
         `UPDATE dm_sessions

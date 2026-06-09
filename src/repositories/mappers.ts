@@ -29,6 +29,10 @@ export function mapGroupRow(row: Record<string, unknown>): GroupFlags {
       ? String(row.active_issue_thread_id)
       : null,
     serviceReactivationPending: Boolean(row.service_reactivation_pending),
+    botLeftAt: row.bot_left_at
+      ? new Date(String(row.bot_left_at)).toISOString()
+      : null,
+    servicePeriodEndNotified: Boolean(row.service_period_end_notified),
   };
 }
 
@@ -58,7 +62,17 @@ export function mapConsultantRow(row: Record<string, unknown>): ConsultantRecord
     status: row.status as ConsultantStatus,
     inviteCode: row.invite_code ? String(row.invite_code) : null,
     displayName: row.display_name ? String(row.display_name) : null,
+    consultantCode: row.consultant_code ? String(row.consultant_code) : null,
     createdAt: new Date(String(row.created_at)).toISOString(),
+    updatedAt: row.updated_at ? new Date(String(row.updated_at)).toISOString() : null,
+    approvedBy: row.approved_by ? String(row.approved_by) : null,
+    approvedAt: row.approved_at
+      ? new Date(String(row.approved_at)).toISOString()
+      : null,
+    disabledBy: row.disabled_by ? String(row.disabled_by) : null,
+    disabledAt: row.disabled_at
+      ? new Date(String(row.disabled_at)).toISOString()
+      : null,
     lastKnowledgeExportAt: row.last_knowledge_export_at
       ? new Date(String(row.last_knowledge_export_at)).toISOString()
       : null,

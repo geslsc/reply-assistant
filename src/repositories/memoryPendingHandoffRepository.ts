@@ -122,6 +122,34 @@ export function createMemoryPendingHandoffRepository(): PendingHandoffRepository
       return { ...handoff };
     },
 
+    async findOpenByConsultantAndGroup(consultantId, groupId) {
+      return Array.from(store.values())
+        .filter(
+          (h) =>
+            h.consultantId === consultantId &&
+            h.groupId === groupId &&
+            h.status === PendingHandoffStatus.OPEN
+        )
+        .map((h) => ({ ...h }));
+    },
+
+    async transferOpenHandoffs({ fromConsultantId, toConsultantId, groupId }) {
+      let count = 0;
+      const now = new Date().toISOString();
+      for (const handoff of store.values()) {
+        if (
+          handoff.consultantId === fromConsultantId &&
+          handoff.groupId === groupId &&
+          handoff.status === PendingHandoffStatus.OPEN
+        ) {
+          handoff.consultantId = toConsultantId;
+          handoff.updatedAt = now;
+          count++;
+        }
+      }
+      return count;
+    },
+
     async clear() {
       store.clear();
     },
