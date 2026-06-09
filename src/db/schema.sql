@@ -120,6 +120,8 @@ CREATE TABLE IF NOT EXISTS consultants (
 
 ALTER TABLE consultants ADD COLUMN IF NOT EXISTS last_knowledge_export_at TIMESTAMPTZ;
 ALTER TABLE group_flags ADD COLUMN IF NOT EXISTS group_name TEXT;
+ALTER TABLE pending_handoffs ADD COLUMN IF NOT EXISTS snoozed BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE pending_handoffs ADD COLUMN IF NOT EXISTS acknowledged_at TIMESTAMPTZ;
 
 CREATE TABLE IF NOT EXISTS knowledge_cards (
   card_id TEXT PRIMARY KEY,
@@ -176,6 +178,8 @@ CREATE TABLE IF NOT EXISTS pending_handoffs (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   closed_at TIMESTAMPTZ,
+  snoozed BOOLEAN NOT NULL DEFAULT FALSE,
+  acknowledged_at TIMESTAMPTZ,
   CONSTRAINT pending_handoffs_status_check CHECK (
     status IN ('open', 'closed', 'invalid')
   ),

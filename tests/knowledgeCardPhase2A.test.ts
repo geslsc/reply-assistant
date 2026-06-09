@@ -64,7 +64,7 @@ describe('Knowledge card Phase 2-A', () => {
     expect(replies[0].text).not.toContain('【小助手使用說明');
   });
 
-  it('admin list all includes paused cards with audit fields', async () => {
+  it('admin list all includes paused cards in human readable format', async () => {
     await getRepos().knowledgeCards.setStatus('op-login', 'paused', {
       updatedBy: TEST_ADMIN,
       confirmedBy: TEST_ADMIN,
@@ -72,8 +72,10 @@ describe('Knowledge card Phase 2-A', () => {
     });
     const replies = await handleViewCommand(TEST_ADMIN, 'all');
     expect(replies[0].text).toMatch(/知識卡清單/);
-    expect(replies[0].text).toMatch(/op-login/);
-    expect(replies[0].text).toMatch(/created_by=/);
+    expect(replies[0].text).toMatch(/登入/);
+    expect(replies[0].text).toMatch(/建議回答：/);
+    expect(replies[0].text).not.toMatch(/created_by=/);
+    expect(replies[0].text).not.toMatch(/status=/);
     expect(replies[0].text).not.toMatch(/"card_id"/);
   });
 
@@ -84,8 +86,10 @@ describe('Knowledge card Phase 2-A', () => {
       confirmedAt: new Date().toISOString(),
     });
     const replies = await handleViewCommand(TEST_CONSULTANT, 'all');
-    expect(replies[0].text).toMatch(/active/);
+    expect(replies[0].text).toMatch(/知識卡清單/);
+    expect(replies[0].text).toMatch(/建議回答：/);
     expect(replies[0].text).not.toMatch(/created_by=/);
+    expect(replies[0].text).not.toMatch(/status=/);
     expect(replies[0].text).not.toMatch(/op-login/);
   });
 

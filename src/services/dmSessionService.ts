@@ -12,11 +12,15 @@ import {
   generateKnowledgeCardDraft,
   hasMinimumDraftInput,
   INSUFFICIENT_DRAFT_INPUT_MESSAGE,
+  NO_ACTIVE_DRAFT_SESSION_MESSAGE,
 } from './knowledgeCardDraftService';
 import { formatValidationErrorsForHuman } from './knowledgeCardValidationMessages';
 import { enforceKnowledgeCardRules } from './knowledgeCardValidator';
-import { isActiveConsultantOrAdmin } from './consultantWhitelist';
-import { resetPrivateFallbackForUser } from './privateFallbackHintService';
+import { isActiveAdmin, isActiveConsultantOrAdmin } from './consultantWhitelist';
+import {
+  resetPrivateFallbackForUser,
+  suppressPrivateFallbackForUser,
+} from './privateFallbackHintService';
 import {
   handleConsultantConfirmSubmit,
   handleConsultantConfirmUpdateAttempt,
@@ -31,6 +35,11 @@ import {
   buildVisionSummaryMessage,
   isVisionConfirmPhrase,
 } from './screenshotVisionSummaryService';
+import {
+  buildOrganizeContentFromHandoff,
+  consumeHandoffReplyContext,
+  isOrganizeFromHandoffPhrase,
+} from './handoffKnowledgeDraftService';
 import type { MemoryDmSessionRepository } from '../repositories/memoryDmSessionRepository';
 
 export interface DmSessionMessageContext {
@@ -103,29 +112,44 @@ function isAmbiguousAck(text: string): boolean {
 }
 
 function draftDataToStoredDraft(session: DmSessionRecord): StoredDraft | undefined {
-  if (!session.draftData?.card) {
+  const card = session.draftData?.card ?? session.draftData?.lastInvalidDraft;
+  if (!card) {
     return undefined;
   }
   return {
-    card: session.draftData.card,
-    draftJson: session.draftData.draftJson ?? JSON.stringify(session.draftData.card, null, 2),
-    draftText: session.draftData.draftText,
+    card,
+    draftJson: session.draftData?.draftJson ?? JSON.stringify(card, null, 2),
+    draftText: session.draftData?.draftText ?? '',
     storedAt: session.updatedAt,
   };
+}
+
+function validationSignature(result: Awaited<ReturnType<typeof generateKnowledgeCardDraft>>): string {
+  if (result.kind !== 'single_card') {
+    return '';
+  }
+  return result.validation.errors.map((error) => `${error.field}:${error.message}`).join(';');
 }
 
 function buildDraftDataFromResult(
   card: KnowledgeCard,
   draftJson: string,
   draftText: string,
-  inputNotes?: string
+  inputNotes?: string,
+  extra?: Partial<DmSessionDraftData>
 ): DmSessionDraftData {
   return {
     card,
     draftJson,
     draftText,
-    humanReadableDraft: formatHumanReadableKnowledgeCard(card),
+    humanReadableDraft: draftText,
     inputNotes,
+    validationStatus: 'valid',
+    validationFailureReason: undefined,
+    lastInvalidDraft: undefined,
+    lastValidationSignature: undefined,
+    validationFailureCount: 0,
+    ...extra,
   };
 }
 
@@ -237,8 +261,17 @@ async function applyDraftResult(
   result: Awaited<ReturnType<typeof generateKnowledgeCardDraft>>,
   inputNotes?: string
 ): Promise<BotReply[]> {
+  const isAdmin = await isActiveAdmin(userId);
+  const signature = validationSignature(result);
+  const priorSignature = session.draftData?.lastValidationSignature;
+  const repeatFailure =
+    result.kind === 'single_card' &&
+    !result.validation.valid &&
+    Boolean(priorSignature) &&
+    priorSignature === signature;
+
   if (result.kind === 'single_card' && result.validation.valid && result.validation.normalized) {
-    const draftText = formatDraftReply(result);
+    const draftText = formatDraftReply(result, { isAdmin });
     const draftData = buildDraftDataFromResult(
       result.validation.normalized,
       result.draftJson ?? JSON.stringify(result.validation.normalized, null, 2),
@@ -246,9 +279,34 @@ async function applyDraftResult(
       inputNotes ?? session.draftData?.inputNotes
     );
     await getRepos().dmSessions.updateDraftData(session.sessionId, draftData, nowIso());
+  } else if (result.kind === 'single_card') {
+    const failureReason = formatValidationErrorsForHuman(result.validation.errors);
+    const attemptedCard = result.attemptedCard ?? session.draftData?.lastInvalidDraft ?? session.draftData?.card;
+    const draftText = formatDraftReply(result, { isAdmin, repeatValidationFailure: repeatFailure });
+    const draftData: DmSessionDraftData = {
+      draftText,
+      humanReadableDraft: draftText,
+      inputNotes: inputNotes ?? session.draftData?.inputNotes,
+      card: undefined,
+      draftJson: result.draftJson ?? session.draftData?.draftJson ?? null,
+      validationStatus: 'failed',
+      validationFailureReason: failureReason,
+      lastInvalidDraft: attemptedCard ?? undefined,
+      lastValidationSignature: signature || priorSignature,
+      validationFailureCount: repeatFailure
+        ? (session.draftData?.validationFailureCount ?? 1) + 1
+        : 1,
+    };
+    await getRepos().dmSessions.updateDraftData(session.sessionId, draftData, nowIso());
   }
-  resetPrivateFallbackForUser(userId);
-  return pushReply(userId, formatDraftReply(result));
+
+  suppressPrivateFallbackForUser(userId);
+  return pushReply(
+    userId,
+    result.kind === 'single_card'
+      ? formatDraftReply(result, { isAdmin, repeatValidationFailure: repeatFailure })
+      : formatDraftReply(result)
+  );
 }
 
 async function processContentIntoDraft(
@@ -262,7 +320,10 @@ async function processContentIntoDraft(
     return pushReply(userId, INSUFFICIENT_DRAFT_INPUT_MESSAGE);
   }
 
-  const existingCard = session.draftData?.card ?? null;
+  const existingCard =
+    session.draftData?.card ??
+    session.draftData?.lastInvalidDraft ??
+    null;
   const result = await generateKnowledgeCardDraft({
     operation,
     consultantRequest: content,
@@ -274,6 +335,29 @@ async function processContentIntoDraft(
     session,
     result,
     inputNotes ?? session.draftData?.inputNotes
+  );
+}
+
+async function handleOrganizeFromHandoff(ctx: DmSessionMessageContext): Promise<BotReply[]> {
+  const context = consumeHandoffReplyContext(ctx.userId);
+  if (!context) {
+    return pushReply(
+      ctx.userId,
+      '目前沒有可整理的代回內容。請先完成代回群組，或輸入「幫我整理知識卡」手動整理。'
+    );
+  }
+
+  const existing = await getActiveSession(ctx.userId);
+  if (existing) {
+    return pushReply(ctx.userId, EXISTING_SESSION_PROMPT);
+  }
+
+  const session = await createActiveSession(ctx.userId);
+  return processContentIntoDraft(
+    ctx.userId,
+    session,
+    buildOrganizeContentFromHandoff(context),
+    'create'
   );
 }
 
@@ -301,7 +385,8 @@ async function handleStartOrganize(ctx: DmSessionMessageContext): Promise<BotRep
 async function handleSupplement(ctx: DmSessionMessageContext): Promise<BotReply[]> {
   const session = await getActiveSession(ctx.userId);
   if (!session) {
-    return pushReply(ctx.userId, '目前沒有草稿，請先「幫我整理知識卡」並提供內容。');
+    suppressPrivateFallbackForUser(ctx.userId);
+    return pushReply(ctx.userId, NO_ACTIVE_DRAFT_SESSION_MESSAGE);
   }
   const payload = ctx.text.replace(SUPPLEMENT_PATTERN, '').trim();
   if (!payload) {
@@ -313,7 +398,8 @@ async function handleSupplement(ctx: DmSessionMessageContext): Promise<BotReply[
 async function handleModify(ctx: DmSessionMessageContext): Promise<BotReply[]> {
   const session = await getActiveSession(ctx.userId);
   if (!session) {
-    return pushReply(ctx.userId, '目前沒有草稿，請先「幫我整理知識卡」並提供內容。');
+    suppressPrivateFallbackForUser(ctx.userId);
+    return pushReply(ctx.userId, NO_ACTIVE_DRAFT_SESSION_MESSAGE);
   }
   const payload = ctx.text.replace(MODIFY_PATTERN, '').trim();
   if (!payload) {
@@ -324,11 +410,12 @@ async function handleModify(ctx: DmSessionMessageContext): Promise<BotReply[]> {
 
 async function handleRegenerate(ctx: DmSessionMessageContext): Promise<BotReply[]> {
   const session = await getActiveSession(ctx.userId);
-  if (!session?.draftData?.card) {
+  const card = session?.draftData?.card ?? session?.draftData?.lastInvalidDraft;
+  if (!session || !card) {
     return pushReply(ctx.userId, '目前沒有可重新整理的草稿內容，請先提供知識卡內容。');
   }
-  const card = session.draftData.card;
-  const humanReadable = formatHumanReadableKnowledgeCard(card);
+  const isAdmin = await isActiveAdmin(ctx.userId);
+  const humanReadable = formatHumanReadableKnowledgeCard(card, { isAdmin });
   const draftData: DmSessionDraftData = {
     ...session.draftData,
     humanReadableDraft: humanReadable,
@@ -341,10 +428,12 @@ async function handleRegenerate(ctx: DmSessionMessageContext): Promise<BotReply[
 
 async function handleExportJson(ctx: DmSessionMessageContext): Promise<BotReply[]> {
   const session = await getActiveSession(ctx.userId);
-  if (!session?.draftData?.card) {
-    return pushReply(ctx.userId, '目前沒有草稿可轉成 JSON。');
+  const card = session?.draftData?.card ?? session?.draftData?.lastInvalidDraft;
+  if (!session || !card) {
+    suppressPrivateFallbackForUser(ctx.userId);
+    return pushReply(ctx.userId, NO_ACTIVE_DRAFT_SESSION_MESSAGE);
   }
-  const validation = enforceKnowledgeCardRules(session.draftData.card);
+  const validation = enforceKnowledgeCardRules(card);
   if (!validation.valid || !validation.normalized) {
     return pushReply(
       ctx.userId,
@@ -354,6 +443,8 @@ async function handleExportJson(ctx: DmSessionMessageContext): Promise<BotReply[
   await getRepos().dmSessions.updateDraftData(
     session.sessionId,
     {
+      draftText: session.draftData?.draftText ?? formatDraftJson(validation.normalized),
+      humanReadableDraft: session.draftData?.humanReadableDraft ?? formatDraftJson(validation.normalized),
       ...session.draftData,
       card: validation.normalized,
       draftJson: JSON.stringify(validation.normalized, null, 2),
@@ -376,10 +467,11 @@ async function handleComplete(ctx: DmSessionMessageContext): Promise<BotReply[]>
 async function handleCancel(ctx: DmSessionMessageContext): Promise<BotReply[]> {
   const session = await getActiveSession(ctx.userId);
   if (!session) {
+    suppressPrivateFallbackForUser(ctx.userId);
     return pushReply(ctx.userId, '目前沒有進行中的草稿整理。');
   }
   await getRepos().dmSessions.markCancelled(session.sessionId, nowIso());
-  resetPrivateFallbackForUser(ctx.userId);
+  suppressPrivateFallbackForUser(ctx.userId);
   return pushReply(ctx.userId, '已取消目前知識卡整理流程，草稿資料已保留。');
 }
 
@@ -427,8 +519,20 @@ async function handleVisionSummaryAdjust(ctx: DmSessionMessageContext): Promise<
 function sessionHasDraftContext(session: DmSessionRecord): boolean {
   return Boolean(
     session.draftData?.card ||
+      session.draftData?.lastInvalidDraft ||
       session.draftData?.inputNotes?.trim() ||
       session.draftData?.pendingVisionSummary?.trim()
+  );
+}
+
+function isDraftCommandWithoutSession(text: string): boolean {
+  const trimmed = text.trim();
+  return (
+    SUPPLEMENT_PATTERN.test(trimmed) ||
+    MODIFY_PATTERN.test(trimmed) ||
+    trimmed === EXPORT_JSON_PHRASE ||
+    isConfirmSubmitPhrase(trimmed) ||
+    matchesConfirmUpdateCommand(trimmed)
   );
 }
 
@@ -497,6 +601,10 @@ export async function handleDmSessionPrivateMessage(
     return handleStartOrganize(ctx);
   }
 
+  if (isOrganizeFromHandoffPhrase(trimmed)) {
+    return handleOrganizeFromHandoff(ctx);
+  }
+
   if (!(await isActiveConsultantOrAdmin(ctx.userId))) {
     return null;
   }
@@ -559,6 +667,10 @@ export async function handleDmSessionPrivateMessage(
 
   const activeSession = await getActiveSession(ctx.userId);
   if (!activeSession) {
+    if (isDraftCommandWithoutSession(trimmed)) {
+      suppressPrivateFallbackForUser(ctx.userId);
+      return pushReply(ctx.userId, NO_ACTIVE_DRAFT_SESSION_MESSAGE);
+    }
     return null;
   }
 

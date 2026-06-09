@@ -40,6 +40,8 @@ export function createPostgresKnowledgeCardRepository(pool: Pool): KnowledgeCard
          WHERE title ILIKE $1
             OR standard_answer ILIKE $1
             OR EXISTS (SELECT 1 FROM unnest(patterns) p WHERE p ILIKE $1)
+            OR EXISTS (SELECT 1 FROM unnest(not_applicable) p WHERE p ILIKE $1)
+            OR EXISTS (SELECT 1 FROM unnest(escalate_to_consultant) p WHERE p ILIKE $1)
          ORDER BY card_id`,
         [pattern]
       );

@@ -33,7 +33,10 @@ import {
   markSessionCompleted,
   storeSessionDraftFromRevision,
   setForceSubmitFailureForTest,
+  getActiveSession,
 } from './dmSessionService';
+import { NO_ACTIVE_DRAFT_SESSION_MESSAGE } from './knowledgeCardDraftService';
+import { suppressPrivateFallbackForUser } from './privateFallbackHintService';
 import { getRepos } from '../repositories';
 
 export const CONFIRM_SUBMIT_PHRASE = '確認送出';
@@ -198,14 +201,26 @@ export async function handleConsultantConfirmSubmit(userId: string): Promise<Bot
       {
         type: 'push',
         userId,
-        text: 'admin 整理知識卡請直接回覆「確認更新」。',
+        text: '您是 admin，請輸入「確認更新」讓知識卡正式生效。',
       },
     ];
   }
 
   const draft = await getSessionDraft(userId);
   if (!draft) {
-    return [{ type: 'push', userId, text: '目前沒有可送出的知識卡草稿，請先整理知識卡。' }];
+    suppressPrivateFallbackForUser(userId);
+    return [{ type: 'push', userId, text: NO_ACTIVE_DRAFT_SESSION_MESSAGE }];
+  }
+
+  const activeSession = await getActiveSession(userId);
+  if (activeSession?.draftData?.validationStatus === 'failed') {
+    return [
+      {
+        type: 'push',
+        userId,
+        text: '目前草稿尚未通過驗證，請先輸入「修改：…」調整後再「確認送出」。',
+      },
+    ];
   }
 
   const submittedAt = new Date().toISOString();
@@ -306,6 +321,17 @@ export async function handleConfirmUpdate(ctx: AdminActionContext): Promise<BotR
     ];
   }
 
+  const activeSession = await getActiveSession(ctx.userId);
+  if (activeSession?.draftData?.validationStatus === 'failed') {
+    return [
+      {
+        type: 'push',
+        userId: ctx.userId,
+        text: '目前草稿尚未通過驗證，請先輸入「修改：…」調整後再確認更新。',
+      },
+    ];
+  }
+
   const resolved = await resolveReviewTarget({
     text: ctx.text,
     quotedMessageId: ctx.quotedMessageId,
@@ -385,6 +411,7 @@ export async function handleConsultantConfirmUpdateAttempt(ctx: AdminActionConte
   if (await isActiveAdmin(ctx.userId)) {
     return handleConfirmUpdate(ctx);
   }
+  suppressPrivateFallbackForUser(ctx.userId);
   return [
     {
       type: 'push',

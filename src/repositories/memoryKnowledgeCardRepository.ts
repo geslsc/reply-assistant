@@ -8,6 +8,7 @@ import {
   KnowledgeCardRepository,
   KnowledgeCardUpdateParams,
 } from './knowledgeCardTypes';
+import { knowledgeCardMatchesQuery } from '../utils/knowledgeCardSearchMatch';
 
 function rowFromParams(params: KnowledgeCardInsertParams): DbKnowledgeCardRecord {
   return {
@@ -29,10 +30,6 @@ function rowFromParams(params: KnowledgeCardInsertParams): DbKnowledgeCardRecord
   };
 }
 
-function normalizeQuery(text: string): string {
-  return text.toLowerCase().replace(/\s+/g, '').trim();
-}
-
 export function createMemoryKnowledgeCardRepository(): KnowledgeCardRepository {
   const cards = new Map<string, DbKnowledgeCardRecord>();
 
@@ -51,13 +48,7 @@ export function createMemoryKnowledgeCardRepository(): KnowledgeCardRepository {
       return (await this.findAll()).filter((c) => c.riskLevel === riskLevel);
     },
     async search(query) {
-      const q = normalizeQuery(query);
-      return (await this.findAll()).filter((card) => {
-        const haystack = normalizeQuery(
-          [card.title, card.standardAnswer, ...card.patterns].join(' ')
-        );
-        return haystack.includes(q);
-      });
+      return (await this.findAll()).filter((card) => knowledgeCardMatchesQuery(card, query));
     },
     async insert(params) {
       const record = rowFromParams(params);

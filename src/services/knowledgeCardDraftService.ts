@@ -23,6 +23,7 @@ export interface SingleCardDraftResult {
   validation: ValidationResult;
   draftJson: string | null;
   reasonText: string | null;
+  attemptedCard?: KnowledgeCard | null;
 }
 
 export interface SuggestionDraftResult {
@@ -147,13 +148,18 @@ export async function generateKnowledgeCardDraft(params: {
   }
 
   const validation = enforceKnowledgeCardRules(parsed);
+  const attemptedCard =
+    typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as KnowledgeCard)
+      : null;
   if (!validation.valid || !validation.normalized) {
     return {
       kind: 'single_card',
       operation,
       validation,
-      draftJson: null,
+      draftJson: attemptedCard ? JSON.stringify(attemptedCard, null, 2) : null,
       reasonText: updatedReason ?? null,
+      attemptedCard,
     };
   }
 
@@ -182,19 +188,29 @@ export function describeAutoPublicReply(card: KnowledgeCard): string {
   return '否，這張卡不會設定成小助手自動公開回答，僅作為導入教練參考。';
 }
 
-export function formatDraftActionHints(): string {
-  return [
+export const NO_ACTIVE_DRAFT_SESSION_MESSAGE =
+  '目前沒有進行中的知識卡草稿。若要重新開始，請輸入「幫我整理知識卡」。';
+
+export function formatDraftActionHints(isAdmin: boolean): string {
+  const lines = [
     '您可以回覆：',
     '- 補充：...',
     '- 修改：...',
     '- 轉成 JSON',
-    '- 確認送出',
-    '- 確認更新',
-    '- 取消',
-  ].join('\n');
+  ];
+  if (isAdmin) {
+    lines.push('- 確認更新', '- 取消');
+  } else {
+    lines.push('- 確認送出', '- 取消');
+  }
+  return lines.join('\n');
 }
 
-export function formatHumanReadableKnowledgeCard(card: KnowledgeCard): string {
+export function formatHumanReadableKnowledgeCard(
+  card: KnowledgeCard,
+  options?: { isAdmin?: boolean }
+): string {
+  const isAdmin = options?.isAdmin ?? false;
   const lines: string[] = [
     '【知識卡草稿】',
     '※ 草稿不會自動生效。',
@@ -222,7 +238,7 @@ export function formatHumanReadableKnowledgeCard(card: KnowledgeCard): string {
   }
 
   lines.push('', '小助手是否會自動公開回答：', describeAutoPublicReply(card));
-  lines.push('', formatDraftActionHints());
+  lines.push('', formatDraftActionHints(isAdmin));
   return lines.join('\n');
 }
 
@@ -311,7 +327,10 @@ export function hasMinimumDraftInput(text: string): boolean {
 }
 
 /** 格式化草稿回覆文字；修改原因只寫在文字，不進 JSON */
-export function formatDraftReply(result: KnowledgeDraftResult): string {
+export function formatDraftReply(
+  result: KnowledgeDraftResult,
+  options?: { isAdmin?: boolean; repeatValidationFailure?: boolean }
+): string {
   if (result.kind === 'suggestion_only') {
     return result.text;
   }
@@ -323,11 +342,17 @@ export function formatDraftReply(result: KnowledgeDraftResult): string {
   }
 
   if (!result.validation.valid || !result.validation.normalized) {
+    if (options?.repeatValidationFailure) {
+      lines.push(
+        '這份草稿仍未通過驗證，我已保留草稿。請再用「修改：…」補充它只是操作教學，或移除金額/帳務相關內容。'
+      );
+      return lines.join('\n');
+    }
     lines.push('【驗證失敗】', formatValidationErrorsForHuman(result.validation.errors));
     return lines.join('\n');
   }
 
-  lines.push(formatHumanReadableKnowledgeCard(result.validation.normalized));
+  lines.push(formatHumanReadableKnowledgeCard(result.validation.normalized, { isAdmin: options?.isAdmin }));
   return lines.join('\n');
 }
 

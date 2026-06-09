@@ -21,6 +21,13 @@ export interface ValidationResult {
 const VALID_RISK_LEVELS = new Set<string>(Object.values(RiskLevel));
 const VALID_STATUSES = new Set<KnowledgeCardStatus>(['可用', '暫停']);
 
+import {
+  containsHardSensitiveKeyword,
+  isTutorialExemptKeyword,
+  matchesOperationTutorial,
+  removeNegationContexts,
+} from './sensitiveContentClassifier';
+
 /** 敏感類型關鍵字：金流、帳務、權限、資料異常 */
 export const SENSITIVE_KEYWORD_GROUPS: Record<string, string[]> = {
   金流: ['金流', '付款', '收款', '匯款', '信用卡', '第三方支付', '藍新', '綠界', 'stripe', 'paypal'],
@@ -38,13 +45,8 @@ export const SENSITIVE_KEYWORD_GROUPS: Record<string, string[]> = {
   ],
 };
 
-const SENSITIVE_FIELDS = [
-  'title',
-  'patterns',
-  'standard_answer',
-  'not_applicable',
-  'escalate_to_consultant',
-] as const;
+/** 僅用於判斷可否 low / 公開回答；不含 not_applicable / escalate_to_consultant */
+const RISK_BLOCKING_FIELDS = ['title', 'patterns', 'standard_answer'] as const;
 
 function collectTextFromField(value: unknown): string[] {
   if (typeof value === 'string') {
@@ -57,19 +59,51 @@ function collectTextFromField(value: unknown): string[] {
 }
 
 export function detectSensitiveCategories(texts: string[]): string[] {
-  const combined = texts.join(' ').toLowerCase();
+  const combined = texts.join(' ');
+  const cleaned = removeNegationContexts(combined);
+
+  if (containsHardSensitiveKeyword(cleaned)) {
+    const matched: string[] = [];
+    for (const [category, keywords] of Object.entries(SENSITIVE_KEYWORD_GROUPS)) {
+      if (keywords.some((kw) => cleaned.toLowerCase().includes(kw.toLowerCase()))) {
+        matched.push(category);
+      }
+    }
+    if (matched.length === 0) {
+      if (/權限/u.test(cleaned)) {
+        matched.push('權限');
+      } else if (/資料/u.test(cleaned) || /同步/u.test(cleaned)) {
+        matched.push('資料異常');
+      } else {
+        matched.push('帳務');
+      }
+    }
+    return [...new Set(matched)];
+  }
+
+  const isTutorial = matchesOperationTutorial(cleaned);
+  const lower = cleaned.toLowerCase();
   const matched: string[] = [];
+
   for (const [category, keywords] of Object.entries(SENSITIVE_KEYWORD_GROUPS)) {
-    if (keywords.some((kw) => combined.includes(kw.toLowerCase()))) {
+    for (const keyword of keywords) {
+      if (!lower.includes(keyword.toLowerCase())) {
+        continue;
+      }
+      if (isTutorial && isTutorialExemptKeyword(keyword)) {
+        continue;
+      }
       matched.push(category);
+      break;
     }
   }
-  return matched;
+
+  return [...new Set(matched)];
 }
 
 export function cardContainsSensitiveContent(card: Partial<KnowledgeCard>): string[] {
   const texts: string[] = [];
-  for (const field of SENSITIVE_FIELDS) {
+  for (const field of RISK_BLOCKING_FIELDS) {
     texts.push(...collectTextFromField(card[field]));
   }
   return detectSensitiveCategories(texts);

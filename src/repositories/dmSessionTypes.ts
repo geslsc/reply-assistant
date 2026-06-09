@@ -13,6 +13,12 @@ export interface DmSessionDraftData {
   inputNotes?: string;
   /** 等待使用者確認的截圖理解摘要，不含圖片資料 */
   pendingVisionSummary?: string;
+  /** dm session 內部：草稿驗證狀態 */
+  validationStatus?: 'valid' | 'failed';
+  validationFailureReason?: string;
+  lastInvalidDraft?: KnowledgeCard;
+  lastValidationSignature?: string;
+  validationFailureCount?: number;
 }
 
 export interface DmSessionRecord {

@@ -19,6 +19,12 @@ import { pauseLastReferencedCard } from './knowledgeBaseService';
 import { summarizeCustomerQuestionForConsultant } from './consultantPrivateAiService';
 import { getActiveIssueThread } from './issueThreadService';
 import { canPauseKnowledgeCard, executeReplyToGroup } from './replyToGroupService';
+import {
+  formatGroupLabelForHandoff,
+  getOpenPendingHandoffs,
+  findOpenHandoffByShortCode,
+} from './pendingHandoffService';
+import { getGroupDisplayName } from './lineGroupSummaryService';
 
 export interface ConsultantActionContext {
   userId: string;
@@ -104,20 +110,54 @@ async function requestHighImpactConfirmation(
   }
 
   if (intent === ConsultantIntent.REPLY_TO_GROUP) {
+    const openList = await getOpenPendingHandoffs(ctx.userId);
+    let handoff = null as Awaited<ReturnType<typeof findOpenHandoffByShortCode>>;
+    if (classified.shortCode) {
+      handoff = await findOpenHandoffByShortCode(ctx.userId, classified.shortCode);
+    } else if (openList.length === 1) {
+      handoff = openList[0];
+    }
+
     setPendingConfirmation(ctx.userId, {
       intent,
       payload: classified.payload,
-      shortCode: classified.shortCode,
+      shortCode: classified.shortCode ?? handoff?.shortCode,
       groupId: ctx.groupId,
     });
-    const preview = classified.payload
-      ? `內容：${classified.payload}`
-      : '（請在確認後再送一次完整代回內容）';
+
+    if (!handoff) {
+      const preview = classified.payload
+        ? `內容：${classified.payload}`
+        : '（請在確認後再送一次完整代回內容）';
+      return [
+        {
+          type: 'push',
+          userId: ctx.userId,
+          text: `代回群組屬高副作用操作，將逐字轉貼至群組。\n${preview}\n請回覆「確認代回」以執行。`,
+        },
+      ];
+    }
+
+    const groupName = await getGroupDisplayName(handoff.groupId);
+    const replyPreview = classified.payload?.trim() || '（請在確認後再送一次完整代回內容）';
     return [
       {
         type: 'push',
         userId: ctx.userId,
-        text: `代回群組屬高副作用操作，將逐字轉貼至群組。\n${preview}\n請回覆「確認代回」以執行。`,
+        text: [
+          '【代回群組確認】',
+          `群組：${formatGroupLabelForHandoff(handoff.groupId, groupName)}`,
+          `問題短碼：${handoff.shortCode}`,
+          '',
+          '【店家問題】',
+          handoff.customerQuestion ?? '（無摘要）',
+          '',
+          '【即將代回群組的內容】',
+          replyPreview,
+          '',
+          '※ 內容會逐字轉貼至群組，不經 LLM 改寫。',
+          '請回覆「確認代回」以執行。',
+        ].join('\n'),
       },
     ];
   }

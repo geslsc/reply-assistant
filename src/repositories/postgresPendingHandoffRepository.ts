@@ -18,6 +18,10 @@ function mapPendingHandoffRow(row: Record<string, unknown>): PendingHandoff {
     status: row.status as PendingHandoffStatus,
     invalidReason: (row.invalid_reason as PendingHandoffInvalidReason | null) ?? null,
     customerQuestion: row.customer_question ? String(row.customer_question) : null,
+    snoozed: Boolean(row.snoozed),
+    acknowledgedAt: row.acknowledged_at
+      ? new Date(row.acknowledged_at as string | Date).toISOString()
+      : null,
     createdAt: new Date(row.created_at as string | Date).toISOString(),
     updatedAt: new Date(row.updated_at as string | Date).toISOString(),
     closedAt: row.closed_at ? new Date(row.closed_at as string | Date).toISOString() : null,
@@ -122,6 +126,18 @@ export function createPostgresPendingHandoffRepository(pool: Pool): PendingHando
         [groupId, reason, now, issueThreadId]
       );
       return result.rowCount ?? 0;
+    },
+
+    async markSnoozed(id) {
+      const now = new Date().toISOString();
+      await pool.query(
+        `UPDATE pending_handoffs
+         SET snoozed = TRUE, acknowledged_at = $2, updated_at = $2
+         WHERE id = $1 AND status = 'open'`,
+        [id, now]
+      );
+      const result = await pool.query('SELECT * FROM pending_handoffs WHERE id = $1', [id]);
+      return result.rows[0] ? mapPendingHandoffRow(result.rows[0]) : null;
     },
 
     async clear() {

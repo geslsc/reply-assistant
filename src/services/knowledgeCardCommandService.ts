@@ -8,7 +8,11 @@ import {
   parseBulkImportPayload,
   previewBulkImport,
 } from './knowledgeCardImportService';
-import { parseViewCommand, handleViewCommand } from './knowledgeCardViewService';
+import { parseViewCommand, handleViewCommand, parseKnowledgeSearchQuery, handleKnowledgeSearchCommand } from './knowledgeCardViewService';
+import {
+  handleSnoozeHandoff,
+  isSnoozeHandoffPhrase,
+} from './pendingHandoffService';
 import {
   handleAdminRejectDraft,
   handleAdminRevisionFeedback,
@@ -34,6 +38,19 @@ export async function handleKnowledgeCardCommand(
   ctx: KnowledgeCardCommandContext
 ): Promise<BotReply[] | null> {
   const trimmed = ctx.text.trim();
+
+  if (isSnoozeHandoffPhrase(trimmed)) {
+    if (!(await isActiveConsultantOrAdmin(ctx.userId))) {
+      return null;
+    }
+    return handleSnoozeHandoff(ctx.userId);
+  }
+
+  const searchQuery = parseKnowledgeSearchQuery(trimmed);
+  if (searchQuery) {
+    const result = await handleKnowledgeSearchCommand(ctx.userId, searchQuery);
+    return result;
+  }
 
   if (isConfirmSubmitPhrase(trimmed)) {
     if (!(await isActiveConsultantOrAdmin(ctx.userId))) {

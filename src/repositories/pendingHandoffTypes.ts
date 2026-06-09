@@ -28,6 +28,8 @@ export interface PendingHandoff {
   status: PendingHandoffStatus;
   invalidReason: PendingHandoffInvalidReason | null;
   customerQuestion: string | null;
+  snoozed: boolean;
+  acknowledgedAt: string | null;
   createdAt: string;
   updatedAt: string;
   closedAt: string | null;
@@ -60,5 +62,6 @@ export interface PendingHandoffRepository {
     issueThreadId: string,
     reason: PendingHandoffInvalidReason
   ): Promise<number>;
+  markSnoozed(id: string): Promise<PendingHandoff | null>;
   clear(): Promise<void>;
 }

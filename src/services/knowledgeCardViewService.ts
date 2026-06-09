@@ -1,25 +1,70 @@
-import { BotReply } from '../types';
+import { BotReply, RiskLevel } from '../types';
 import { getRepos } from '../repositories';
 import { isActiveAdmin, isActiveConsultantOrAdmin, getConsultant } from './consultantWhitelist';
 import { splitLongText } from './knowledgeCardExportService';
-import { dbRecordToExportJson } from '../schemas/knowledgeCardDbSchema';
 import { DbKnowledgeCardRecord } from '../schemas/knowledgeCardDbSchema';
+import { dbRecordToKnowledgeCard } from '../schemas/knowledgeCardDbSchema';
+import { knowledgeCardMatchesQuery } from '../utils/knowledgeCardSearchMatch';
 
-function formatAdminCardSummary(record: DbKnowledgeCardRecord): string {
-  const exported = dbRecordToExportJson(record);
-  return [
-    `- ${exported.card_id}｜${exported.title}`,
-    `  status=${exported.status} risk=${exported.risk_level}`,
-    `  created_by=${exported.created_by} confirmed_by=${exported.confirmed_by}`,
-    `  created_at=${exported.created_at}`,
-    exported.updated_at ? `  updated_by=${exported.updated_by} updated_at=${exported.updated_at}` : '',
-  ]
-    .filter(Boolean)
-    .join('\n');
+function cardMatchesQuery(record: DbKnowledgeCardRecord, query: string): boolean {
+  return knowledgeCardMatchesQuery(record, query);
 }
 
-function formatConsultantCardSummary(record: DbKnowledgeCardRecord): string {
-  return `- ${record.cardId}｜${record.title}｜risk=${record.riskLevel}`;
+function describePublicReplyForView(record: DbKnowledgeCardRecord): { label: string; reason?: string } {
+  if (record.canPublicReply && record.riskLevel === RiskLevel.LOW) {
+    return { label: '會' };
+  }
+  if (record.riskLevel !== RiskLevel.LOW) {
+    return {
+      label: '不會',
+      reason: '涉及金額或帳務確認時，需要導入教練協助。',
+    };
+  }
+  return {
+    label: '不會',
+    reason: '這張卡僅作為導入教練參考，不會自動公開回答。',
+  };
+}
+
+function formatCardNumber(cardId: string): string {
+  const digits = cardId.replace(/\D/g, '');
+  if (digits.length >= 3) {
+    return digits.slice(-3).padStart(3, '0');
+  }
+  return cardId.slice(-3).padStart(3, '0');
+}
+
+export function formatHumanReadableKnowledgeCardView(record: DbKnowledgeCardRecord): string {
+  const card = dbRecordToKnowledgeCard(record);
+  const publicReply = describePublicReplyForView(record);
+  const lines: string[] = [
+    `【知識卡】${card.title}（${formatCardNumber(card.card_id)}）`,
+    '',
+    '店家可能會問：',
+    ...card.patterns.map((pattern) => `- ${pattern}`),
+    '',
+    '建議回答：',
+    card.standard_answer,
+  ];
+
+  if (card.not_applicable.length > 0) {
+    lines.push('', '不適用情況：', ...card.not_applicable.map((item) => `- ${item}`));
+  }
+
+  if (card.escalate_to_consultant.length > 0) {
+    lines.push(
+      '',
+      '需要導入教練協助：',
+      ...card.escalate_to_consultant.map((item) => `- ${item}`)
+    );
+  }
+
+  lines.push('', '小助手是否會自動回群組：', publicReply.label);
+  if (publicReply.reason) {
+    lines.push(`原因：${publicReply.reason}`);
+  }
+
+  return lines.join('\n');
 }
 
 async function ensureCanViewKnowledgeCards(userId: string): Promise<BotReply[] | null> {
@@ -37,28 +82,43 @@ async function ensureCanViewKnowledgeCards(userId: string): Promise<BotReply[] |
   ];
 }
 
+async function filterRecordsForUser(
+  userId: string,
+  records: DbKnowledgeCardRecord[]
+): Promise<DbKnowledgeCardRecord[]> {
+  const isAdmin = await isActiveAdmin(userId);
+  return isAdmin ? records : records.filter((record) => record.status === 'active');
+}
+
+function formatResultList(params: {
+  title: string;
+  records: DbKnowledgeCardRecord[];
+  emptyMessage: string;
+}): string {
+  const lines = [params.title, `共 ${params.records.length} 張`, ''];
+  if (params.records.length === 0) {
+    lines.push(params.emptyMessage);
+    return lines.join('\n');
+  }
+  for (const record of params.records) {
+    lines.push(formatHumanReadableKnowledgeCardView(record), '');
+  }
+  return lines.join('\n').trim();
+}
+
 export async function listAllKnowledgeCards(userId: string): Promise<BotReply[]> {
   const blocked = await ensureCanViewKnowledgeCards(userId);
   if (blocked) {
     return blocked;
   }
 
-  const isAdmin = await isActiveAdmin(userId);
-  const records = isAdmin
-    ? await getRepos().knowledgeCards.findAll()
-    : await getRepos().knowledgeCards.findByStatus('active');
-
-  const lines = [
-    isAdmin ? '【知識卡清單｜全部】' : '【知識卡清單｜active】',
-    `共 ${records.length} 張`,
-    '',
-  ];
-  for (const record of records) {
-    lines.push(
-      isAdmin ? formatAdminCardSummary(record) : formatConsultantCardSummary(record)
-    );
-  }
-  return splitLongText(lines.join('\n')).map((text) => ({ type: 'push' as const, userId, text }));
+  const records = await filterRecordsForUser(userId, await getRepos().knowledgeCards.findAll());
+  const text = formatResultList({
+    title: '【知識卡清單】',
+    records,
+    emptyMessage: '（目前沒有知識卡）',
+  });
+  return splitLongText(text).map((chunk) => ({ type: 'push' as const, userId, text: chunk }));
 }
 
 export async function listActiveKnowledgeCards(userId: string): Promise<BotReply[]> {
@@ -67,42 +127,53 @@ export async function listActiveKnowledgeCards(userId: string): Promise<BotReply
     return blocked;
   }
 
-  const isAdmin = await isActiveAdmin(userId);
-  const records = await getRepos().knowledgeCards.findByStatus('active');
-  const lines = ['【active 知識卡】', `共 ${records.length} 張`, ''];
-  for (const record of records) {
-    lines.push(
-      isAdmin ? formatAdminCardSummary(record) : formatConsultantCardSummary(record)
-    );
-  }
-  return splitLongText(lines.join('\n')).map((text) => ({ type: 'push' as const, userId, text }));
+  const records = await filterRecordsForUser(
+    userId,
+    await getRepos().knowledgeCards.findByStatus('active')
+  );
+  const text = formatResultList({
+    title: '【active 知識卡】',
+    records,
+    emptyMessage: '（目前沒有 active 知識卡）',
+  });
+  return splitLongText(text).map((chunk) => ({ type: 'push' as const, userId, text: chunk }));
 }
 
-export async function searchLoginRelatedCards(userId: string): Promise<BotReply[]> {
+export async function searchKnowledgeCards(userId: string, query: string): Promise<BotReply[]> {
   const blocked = await ensureCanViewKnowledgeCards(userId);
   if (blocked) {
     return blocked;
   }
 
-  const isAdmin = await isActiveAdmin(userId);
-  const records = await getRepos().knowledgeCards.search('登入');
-  const filtered = isAdmin ? records : records.filter((record) => record.status === 'active');
+  const repoResults = await getRepos().knowledgeCards.search(query);
+  const filtered = await filterRecordsForUser(userId, repoResults);
+  const fallbackFiltered = (
+    filtered.length > 0
+      ? filtered
+      : await filterRecordsForUser(
+          userId,
+          (await getRepos().knowledgeCards.findAll()).filter((record) =>
+            cardMatchesQuery(record, query)
+          )
+        )
+  ).filter((record) => cardMatchesQuery(record, query));
 
-  const lines = ['【登入相關知識卡】', `共 ${filtered.length} 張`, ''];
-  for (const record of filtered) {
-    lines.push(
-      isAdmin ? formatAdminCardSummary(record) : formatConsultantCardSummary(record)
-    );
-  }
-  if (filtered.length === 0) {
-    lines.push('（找不到相關知識卡）');
-  }
-  return [{ type: 'push', userId, text: lines.join('\n') }];
+  const text = formatResultList({
+    title: `【知識卡查詢：${query}】`,
+    records: fallbackFiltered,
+    emptyMessage: '（找不到相關知識卡）',
+  });
+  return splitLongText(text).map((chunk) => ({ type: 'push' as const, userId, text: chunk }));
 }
 
 export function parseViewCommand(text: string): 'all' | 'active' | 'login' | null {
   const trimmed = text.trim();
-  if (trimmed === '列出所有知識卡') {
+  if (
+    trimmed === '列出所有知識卡' ||
+    trimmed === '列出所有知識哪' ||
+    trimmed === '列出所有知識' ||
+    trimmed === '所有知識卡'
+  ) {
     return 'all';
   }
   if (trimmed === '列出 active 的卡') {
@@ -110,6 +181,28 @@ export function parseViewCommand(text: string): 'all' | 'active' | 'login' | nul
   }
   if (trimmed === '找跟登入有關的卡') {
     return 'login';
+  }
+  return null;
+}
+
+export function parseKnowledgeSearchQuery(text: string): string | null {
+  const trimmed = text.trim();
+  const patterns: RegExp[] = [
+    /^查詢知識卡[:：]?\s*(.+)$/u,
+    /^找跟(.+?)相關的知識卡$/u,
+    /^找跟(.+?)有關的卡$/u,
+    /^找(.+?)相關知識卡$/u,
+    /^搜尋[:：]?\s*(.+)$/u,
+    /^有沒有(.+?)的知識卡$/u,
+    /^查[:：]?\s*(.+)$/u,
+    /^找[:：]?\s*(.+)$/u,
+  ];
+
+  for (const pattern of patterns) {
+    const match = trimmed.match(pattern);
+    if (match?.[1]?.trim()) {
+      return match[1].trim();
+    }
   }
   return null;
 }
@@ -124,5 +217,12 @@ export async function handleViewCommand(
   if (command === 'active') {
     return listActiveKnowledgeCards(userId);
   }
-  return searchLoginRelatedCards(userId);
+  return searchKnowledgeCards(userId, '登入');
+}
+
+export async function handleKnowledgeSearchCommand(
+  userId: string,
+  query: string
+): Promise<BotReply[]> {
+  return searchKnowledgeCards(userId, query);
 }

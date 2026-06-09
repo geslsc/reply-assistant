@@ -22,6 +22,8 @@ export function createMemoryPendingHandoffRepository(): PendingHandoffRepository
         status: PendingHandoffStatus.OPEN,
         invalidReason: null,
         customerQuestion: params.customerQuestion,
+        snoozed: false,
+        acknowledgedAt: null,
         createdAt: now,
         updatedAt: now,
         closedAt: null,
@@ -106,6 +108,18 @@ export function createMemoryPendingHandoffRepository(): PendingHandoffRepository
         }
       }
       return count;
+    },
+
+    async markSnoozed(id) {
+      const handoff = store.get(id);
+      if (!handoff || handoff.status !== PendingHandoffStatus.OPEN) {
+        return null;
+      }
+      const now = new Date().toISOString();
+      handoff.snoozed = true;
+      handoff.acknowledgedAt = now;
+      handoff.updatedAt = now;
+      return { ...handoff };
     },
 
     async clear() {

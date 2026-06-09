@@ -17,6 +17,8 @@ import {
   getPendingHandoffs,
   isPendingHandoffOpen,
 } from './pendingHandoffService';
+import { getGroupDisplayName } from './lineGroupSummaryService';
+import { storeHandoffReplyContext } from './handoffKnowledgeDraftService';
 import {
   PendingHandoff,
   PendingHandoffInvalidReason,
@@ -238,10 +240,22 @@ export async function executeReplyToGroup(params: ReplyToGroupParams): Promise<R
 
   await closePendingHandoff(handoff.id);
 
+  const groupName = await getGroupDisplayName(handoff.groupId);
+  storeHandoffReplyContext(params.consultantId, {
+    groupId: handoff.groupId,
+    groupName,
+    shortCode: handoff.shortCode,
+    customerQuestion: handoff.customerQuestion ?? '',
+    replyText: trimmedReply,
+  });
+
   pushReplies.push({
     type: 'push',
     userId: params.consultantId,
-    text: `已成功代回群組（${handoff.shortCode}）。`,
+    text: [
+      `已成功代回群組（${handoff.shortCode}）。`,
+      '若這題適合沉澱成知識卡，可輸入「整理成知識卡」，我會把店家問題與您的回覆整理成草稿。',
+    ].join('\n'),
   });
 
   return { success: true, replies: pushReplies };

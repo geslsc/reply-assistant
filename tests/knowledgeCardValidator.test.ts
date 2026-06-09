@@ -77,6 +77,76 @@ describe('Knowledge Card Validator', () => {
     expect(deriveCanPublicReply(RiskLevel.LOW)).toBe(true);
     expect(deriveCanPublicReply(RiskLevel.MID)).toBe(false);
   });
+
+  it('allows checkout operation tutorial as low risk', () => {
+    const card = {
+      ...baseCard,
+      card_id: 'checkout-tutorial',
+      title: '新增結帳單操作教學',
+      patterns: ['怎麼新增結帳單', '快速結帳單在哪'],
+      standard_answer: '到「結帳」→「新增結帳單」按鈕即可建立。',
+      risk_level: RiskLevel.LOW,
+      can_public_reply: true,
+    };
+    const result = validateKnowledgeCard(card);
+    expect(result.valid).toBe(true);
+    expect(result.normalized?.can_public_reply).toBe(true);
+  });
+
+  it('allows stored-value card setup tutorial as low risk', () => {
+    const card = {
+      ...baseCard,
+      card_id: 'stored-value-setup',
+      title: '儲值卡設定',
+      patterns: ['儲值卡在哪裡設定', '如何建立儲值卡'],
+      standard_answer: '到「設定」→「票券管理」中新增儲值卡。',
+      not_applicable: ['儲值金額錯誤'],
+      escalate_to_consultant: ['餘額異常', '扣抵異常'],
+      risk_level: RiskLevel.LOW,
+      can_public_reply: true,
+    };
+    const result = validateKnowledgeCard(card);
+    expect(result.valid).toBe(true);
+    expect(result.normalized?.can_public_reply).toBe(true);
+  });
+
+  it('blocks stored-value amount errors', () => {
+    const result = validateKnowledgeCard({
+      ...baseCard,
+      card_id: 'billing-error',
+      title: '儲值金額錯誤',
+      patterns: ['儲值金額錯誤怎麼辦'],
+      standard_answer: '請聯繫導入教練協助。',
+      risk_level: RiskLevel.LOW,
+      can_public_reply: true,
+    });
+    expect(result.valid).toBe(false);
+  });
+
+  it('blocks balance anomaly and payment/refund/reconciliation topics', () => {
+    for (const title of ['餘額異常', '付款失敗', '退款問題', '對帳問題']) {
+      const result = validateKnowledgeCard({
+        ...baseCard,
+        card_id: `sensitive-${title}`,
+        title,
+        patterns: [title],
+        standard_answer: '請聯繫導入教練協助。',
+        risk_level: RiskLevel.LOW,
+        can_public_reply: true,
+      });
+      expect(result.valid).toBe(false);
+    }
+  });
+
+  it('does not treat negation phrases as billing sensitive', () => {
+    expect(
+      cardContainsSensitiveContent({
+        title: '新增結帳單操作教學',
+        patterns: ['修改：這張知識卡主要是教店家怎麼新增結帳單的操作，並沒有真的涉及帳務問題。'],
+        standard_answer: '到結帳頁按新增結帳單即可，沒有涉及帳務，只是操作教學。',
+      })
+    ).toHaveLength(0);
+  });
 });
 
 describe('Knowledge Card Draft Service', () => {
