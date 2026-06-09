@@ -37,6 +37,47 @@ export interface ReplyToGroupParams {
   shortCode?: string;
 }
 
+function formatReplyToGroupMessage(customerQuestion: string, replyText: string): string {
+  const trimmedQuestion = customerQuestion.trim();
+  let questionLine = trimmedQuestion;
+  if (trimmedQuestion.length > 80) {
+    questionLine = `${trimmedQuestion.slice(0, 77)}…`;
+  }
+  if (!questionLine) {
+    return replyText;
+  }
+  if (trimmedQuestion.includes('\n')) {
+    const summary = trimmedQuestion.split('\n')[0]?.trim() ?? trimmedQuestion;
+    questionLine = summary.length > 40 ? `${summary.slice(0, 37)}…` : summary;
+    return `針對您剛剛詢問的「${questionLine}」：\n\n${replyText}`;
+  }
+  return `針對您剛剛提到：\n「${questionLine}」\n\n${replyText}`;
+}
+
+export function buildReplyToGroupConfirmationText(params: {
+  groupName: string | null;
+  groupId: string;
+  shortCode: string;
+  customerQuestion: string;
+  replyText: string;
+}): string {
+  const groupLabel = params.groupName ?? params.groupId;
+  return [
+    '【代回群組確認】',
+    `群組：${groupLabel}`,
+    `問題短碼：${params.shortCode}`,
+    `店家原問題：${params.customerQuestion}`,
+    '',
+    '將代回群組的內容：',
+    params.replyText,
+    '',
+    '提醒：群組中會附上店家原問題，讓店家知道這段回覆是針對哪一題。',
+    '提醒：回覆內容會逐字轉貼，不經 LLM 改寫。',
+    '',
+    '請回覆「確認代回」以執行。',
+  ].join('\n');
+}
+
 function formatEventDetail(params: {
   issueThreadId: string;
   groupId: string;
@@ -219,7 +260,7 @@ export async function executeReplyToGroup(params: ReplyToGroupParams): Promise<R
     {
       type: 'push',
       userId: handoff.groupId,
-      text: trimmedReply,
+      text: formatReplyToGroupMessage(handoff.customerQuestion ?? '', trimmedReply),
     },
   ];
 
@@ -254,7 +295,8 @@ export async function executeReplyToGroup(params: ReplyToGroupParams): Promise<R
     userId: params.consultantId,
     text: [
       `已成功代回群組（${handoff.shortCode}）。`,
-      '若這題適合沉澱成知識卡，可輸入「整理成知識卡」，我會把店家問題與您的回覆整理成草稿。',
+      '若這題適合沉澱成知識卡，可輸入「把剛剛代回整理成知識卡」，或輸入「' +
+        `${handoff.shortCode} 整理成知識卡」。`,
     ].join('\n'),
   });
 

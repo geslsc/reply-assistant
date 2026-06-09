@@ -170,24 +170,19 @@ describe('MVP Core Tests', () => {
     });
   });
 
-  describe('7. mute 啟用時清 waitingFlag', () => {
-    it('clears waitingFlag when mute is enabled', async () => {
+  describe('7. mute 啟用', () => {
+    it('mutes assistant with 小助手先休息一下', async () => {
       await setupServicePeriod();
-      await processMessage(groupMsg(TEST_CONSULTANT, '有什麼可以協助您的嗎?'));
-      expect((await getGroupFlags(TEST_GROUP)).waitingFlag).toBe(true);
-
-      await processMessage(groupMsg(TEST_CONSULTANT, '小助手先休息'));
+      await processMessage(groupMsg(TEST_CONSULTANT, '小助手先休息一下'));
       const flags = await getGroupFlags(TEST_GROUP);
       expect(flags.mute).toBe(true);
-      expect(flags.waitingFlag).toBe(false);
     });
   });
 
-  describe('8. mute 優先於 waitingFlag', () => {
-    it('does not respond to customer when muted even if waitingFlag was set', async () => {
+  describe('8. mute 優先於 customer message', () => {
+    it('does not respond to customer when muted', async () => {
       await setupServicePeriod();
-      await processMessage(groupMsg(TEST_CONSULTANT, '有什麼可以協助您的嗎?'));
-      await processMessage(groupMsg(TEST_CONSULTANT, '小助手先休息'));
+      await processMessage(groupMsg(TEST_CONSULTANT, '小助手先休息一下'));
 
       const result = await processMessage(groupMsg(TEST_CUSTOMER, '怎麼登入後台'));
       expect(result.replies.length).toBe(0);

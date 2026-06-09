@@ -93,7 +93,7 @@ describe('Private message handler entry order', () => {
 
     const result = await privateMsg(TEST_ADMIN, '確認代回');
     const groupPush = result.replies.find((r) => r.type === 'push' && r.userId === TEST_GROUP);
-    expect(groupPush?.text).toBe('逐字代回內容');
+    expect(groupPush?.text).toContain('逐字代回內容');
     expect(complete).not.toHaveBeenCalled();
 
     const events = await getEventsByType(EventType.CONSULTANT_OVERRIDE);

@@ -2,30 +2,20 @@ import {
   Actor,
   BotReply,
   CLOSING_SIGNALS,
-  ConsultantRole,
-  EventType,
   ProcessResult,
   REOPEN_SIGNALS,
-  STANDBY_PHRASES,
   ThreadState,
 } from '../types';
 import { logger } from '../config/logger';
 import {
   approveConsultant,
   getActiveAdmins,
-  getActiveConsultants,
   isActiveAdmin,
   isActiveConsultantOrAdmin,
   requestConsultantJoin,
 } from '../services/consultantWhitelist';
-import { createEvent, getEventLogs, logStateTransition } from '../services/eventLogService';
-import {
-  getGroupFlags,
-  isMuted,
-  setMute,
-  setWaitingFlag,
-} from '../services/groupFlags';
-import { pauseLastReferencedCard } from '../services/knowledgeBaseService';
+import { getEventLogs, logStateTransition } from '../services/eventLogService';
+import { getGroupFlags, isMuted } from '../services/groupFlags';
 import { handleKnowledgeCardCommand } from '../services/knowledgeCardCommandService';
 import {
   expireStaleSessionIfNeeded,
@@ -33,6 +23,18 @@ import {
 } from '../services/dmSessionService';
 import { appendBackupReminderIfNeeded } from '../services/knowledgeCardBackupReminderService';
 import { handleConsultantNaturalLanguage } from '../services/consultantActionService';
+import {
+  GROUP_ASSISTANT_COMMANDS,
+  getDeprecatedSyntaxHint,
+  isGroupCustomerUsageGuideRequest,
+} from '../services/groupAssistantCommandService';
+import {
+  handleAssistantCorrection,
+  onConsultantHumanReplyDuringCorrection,
+  onThreadClosedAfterCorrection,
+} from '../services/consultantCorrectionService';
+import { handleCustomerTeachingFollowUp } from '../services/customerTeachingFollowUpService';
+import { handlePrivateCodeNavigation } from '../services/privateCodeNavigationService';
 import {
   ACTIVE_PRIVATE_FALLBACK_HINT,
   buildIdentityReply,
@@ -44,12 +46,12 @@ import {
   handleGroupUsageGuide,
   isUsageGuideRequest,
 } from '../services/knowledgeCardUsageGuideHandler';
+import { isNannyPeriodApproximatePhrase } from '../services/consultantIntentClassifier';
 import {
   consumePrivateFallbackHint,
   SIMPLIFIED_PRIVATE_FALLBACK_HINT,
 } from '../services/privateFallbackHintService';
 import { handleConsultantMute } from '../services/consultantGroupControlService';
-import { isNannyPeriodPhrase, isNannyPeriodApproximatePhrase, NANNY_PERIOD_STANDARD_SYNTAX_HINT } from '../services/consultantIntentClassifier';
 import {
   getActiveIssueThread,
   getThreadsByGroup,
@@ -60,14 +62,12 @@ import {
 } from '../services/issueThreadService';
 import { settleGroupTimeouts } from '../services/passiveTimeoutSettlement';
 import {
-  flushCollectingBuffersForGroup,
   handleIncomingCustomerGroupMessage,
   settleExpiredGroupBuffers,
 } from '../services/groupMessageConvergenceService';
 import {
   handleServiceIntroduction,
-  handleServiceReactivationConfirm,
-  handleServiceReactivationRequest,
+  handleServiceReactivationDirect,
   isOutOfService,
 } from '../services/servicePeriodService';
 import { refreshGroupNameIfNeeded } from '../services/lineGroupSummaryService';
@@ -96,11 +96,6 @@ function isReopenSignal(text: string): boolean {
   return REOPEN_SIGNALS.some((s) => text.includes(s));
 }
 
-function isStandbyPhrase(text: string): boolean {
-  const trimmed = text.trim();
-  return STANDBY_PHRASES.some((s) => trimmed === s || trimmed.includes(s.replace('?', '？')));
-}
-
 async function handleClosingSignal(
   groupId: string,
   userId: string,
@@ -112,71 +107,34 @@ async function handleClosingSignal(
   }
 
   const fromState = thread.state;
-  await resolveThread(groupId, thread.issueThreadId);
+  const issueThreadId = thread.issueThreadId;
+  await resolveThread(groupId, issueThreadId);
   await logStateTransition({
     group_id: groupId,
-    issue_thread_id: thread.issueThreadId,
+    issue_thread_id: issueThreadId,
     from_state: fromState,
     to_state: ThreadState.IDLE,
     actor: Actor.CONSULTANT,
     actor_user_id: userId,
     detail: `closing signal: ${text.trim()}`,
   });
-  return [];
+  return onThreadClosedAfterCorrection(groupId, issueThreadId);
 }
 
-async function handleConsultantCorrection(
+async function handleConsultantHumanTakeover(
   groupId: string,
-  userId: string
-): Promise<BotReply[]> {
-  const thread = await getActiveIssueThread(groupId);
-  await createEvent({
-    event_type: EventType.CONSULTANT_CORRECTION,
-    group_id: groupId,
-    issue_thread_id: thread?.issueThreadId ?? null,
-    actor: Actor.CONSULTANT,
-    actor_user_id: userId,
-    detail: 'manual correction triggered',
-  });
-  return [
-    {
-      type: 'group',
-      text: '已記錄顧問更正,後續將依顧問確認內容處理。',
-    },
-  ];
-}
-
-async function handlePauseKnowledgeCard(
-  groupId: string,
-  userId: string
-): Promise<BotReply[]> {
-  const thread = await getActiveIssueThread(groupId);
-  const cardId = thread?.lastKnowledgeCardId ?? null;
-  const card = await pauseLastReferencedCard(cardId, userId);
-  const replies: BotReply[] = [];
-
-  if (card) {
-    replies.push({
-      type: 'group',
-      text: `已將知識卡「${card.card_id}」標記暫停,管理者將收到提醒。`,
-    });
-    const admins = (await getActiveConsultants()).filter(
-      (c) => c.role === ConsultantRole.ADMIN
-    );
-    for (const admin of admins) {
-      replies.push({
-        type: 'push',
-        userId: admin.userId,
-        text: `【知識卡暫停】顧問 ${userId} 標記「${card.card_id}」需修正。`,
-      });
-    }
-  } else {
-    replies.push({
-      type: 'group',
-      text: '目前沒有可暫停的知識卡,請在回答後再使用此指令。',
-    });
+  userId: string,
+  text: string
+): Promise<void> {
+  if (text.length === 0) {
+    return;
   }
-  return replies;
+  const thread = await getActiveIssueThread(groupId);
+  if (!thread) {
+    return;
+  }
+  await markConsultantAnswered(groupId, thread.issueThreadId);
+  await onConsultantHumanReplyDuringCorrection(groupId, text);
 }
 
 async function handleCustomerQuestion(
@@ -216,6 +174,15 @@ async function handleCustomerQuestion(
         detail: 'thread reopened by customer follow-up',
       });
     }
+  }
+
+  const followUpReplies = await handleCustomerTeachingFollowUp({
+    groupId,
+    customerUserId: userId,
+    text,
+  });
+  if (followUpReplies) {
+    return followUpReplies;
   }
 
   return handleIncomingCustomerGroupMessage({
@@ -275,6 +242,14 @@ async function handlePrivateMessage(message: IncomingMessage): Promise<BotReply[
   if (isActive) {
     if (isUsageGuideRequest(text)) {
       return handlePrivateUsageGuide(message.userId);
+    }
+
+    const codeNavReplies = await handlePrivateCodeNavigation(message.userId, text);
+    if (codeNavReplies) {
+      if (await isActiveAdmin(message.userId)) {
+        await appendBackupReminderIfNeeded(message.userId, codeNavReplies);
+      }
+      return codeNavReplies;
     }
 
     const expiredReplies = await expireStaleSessionIfNeeded(message.userId);
@@ -395,79 +370,57 @@ export async function processMessage(message: IncomingMessage): Promise<ProcessR
   const isConsultant = await isActiveConsultantOrAdmin(message.userId);
 
   if (isConsultant) {
-    replies.push(...(await flushCollectingBuffersForGroup(groupId)));
-    if (isUsageGuideRequest(text)) {
+    if (isClosingSignal(text)) {
+      replies.push(...(await handleClosingSignal(groupId, message.userId, text)));
+      return { replies, events: await getEventLogs() };
+    }
+
+    const deprecatedHint = getDeprecatedSyntaxHint(text);
+    if (deprecatedHint) {
+      replies.push({ type: 'group', text: deprecatedHint });
+      return { replies, events: await getEventLogs() };
+    }
+
+    if (isGroupCustomerUsageGuideRequest(text)) {
       replies.push(...handleGroupUsageGuide());
       return { replies, events: await getEventLogs() };
     }
 
-    if (text === '小助手先休息') {
+    if (text === GROUP_ASSISTANT_COMMANDS.INTRO) {
+      replies.push(...(await handleServiceIntroduction(groupId, message.userId)));
+      return { replies, events: await getEventLogs() };
+    }
+    if (text === GROUP_ASSISTANT_COMMANDS.MUTE) {
       replies.push(...(await handleConsultantMute(groupId, message.userId, true)));
       return { replies, events: await getEventLogs() };
     }
-    if (text === '小助手回來') {
+    if (text === GROUP_ASSISTANT_COMMANDS.UNMUTE) {
       replies.push(...(await handleConsultantMute(groupId, message.userId, false)));
       return { replies, events: await getEventLogs() };
     }
-    if (text === '小助手自我介紹一下') {
-      replies.push(...(await handleServiceIntroduction(groupId, message.userId)));
+    if (text === GROUP_ASSISTANT_COMMANDS.REACTIVATE) {
+      replies.push(...(await handleServiceReactivationDirect(groupId, message.userId)));
       return { replies, events: await getEventLogs() };
     }
-    if (isNannyPeriodPhrase(text)) {
-      replies.push(...(await handleServiceIntroduction(groupId, message.userId)));
-      return { replies, events: await getEventLogs() };
-    }
-    if (isNannyPeriodApproximatePhrase(text)) {
-      replies.push({ type: 'group', text: NANNY_PERIOD_STANDARD_SYNTAX_HINT });
-      return { replies, events: await getEventLogs() };
-    }
-    if (text === '重新啟用教學協助期') {
-      replies.push(...(await handleServiceReactivationRequest(groupId, message.userId)));
-      return { replies, events: await getEventLogs() };
-    }
-    if (text === '確認重新啟用') {
-      replies.push(...(await handleServiceReactivationConfirm(groupId, message.userId)));
-      return { replies, events: await getEventLogs() };
-    }
-    if (isStandbyPhrase(text)) {
-      if (!(await isMuted(groupId))) {
-        await setWaitingFlag(groupId, true);
-      }
-      return { replies, events: await getEventLogs() };
-    }
-    if (text === '小助手這題我更正') {
-      replies.push(...(await handleConsultantCorrection(groupId, message.userId)));
-      return { replies, events: await getEventLogs() };
-    }
-    if (text === '這篇要改') {
-      replies.push(...(await handlePauseKnowledgeCard(groupId, message.userId)));
-      return { replies, events: await getEventLogs() };
-    }
-    if (isClosingSignal(text)) {
-      await handleClosingSignal(groupId, message.userId, text);
+    if (text === GROUP_ASSISTANT_COMMANDS.CORRECTION) {
+      replies.push(...(await handleAssistantCorrection(groupId, message.userId)));
       return { replies, events: await getEventLogs() };
     }
 
-    const naturalReplies = await handleConsultantNaturalLanguage({
-      userId: message.userId,
-      text,
-      groupId,
-      isGroup: true,
-    });
-    if (naturalReplies) {
-      replies.push(...naturalReplies);
-      return { replies, events: await getEventLogs() };
-    }
+    await handleConsultantHumanTakeover(groupId, message.userId, text);
+    return { replies, events: await getEventLogs() };
+  }
 
-    const activeThread = await getActiveIssueThread(groupId);
-    if (
-      activeThread &&
-      activeThread.state === ThreadState.CONSULTANT_HANDOFF &&
-      text.length > 0
-    ) {
-      await markConsultantAnswered(groupId, activeThread.issueThreadId);
-    }
-  } else if (isClosingSignal(text)) {
+  if (isGroupCustomerUsageGuideRequest(text)) {
+    replies.push(...handleGroupUsageGuide());
+    return { replies, events: await getEventLogs() };
+  }
+
+  if (getDeprecatedSyntaxHint(text)) {
+    return { replies, events: await getEventLogs() };
+  }
+
+  if (isClosingSignal(text)) {
     return { replies: [], events: await getEventLogs() };
   }
 
@@ -475,14 +428,12 @@ export async function processMessage(message: IncomingMessage): Promise<ProcessR
     return { replies, events: await getEventLogs() };
   }
 
-  if (!isConsultant) {
-    replies.push(
-      ...(await handleCustomerQuestion(groupId, message.userId, text, {
-        messageId: message.replyToken,
-        timestamp: message.timestamp,
-      }))
-    );
-  }
+  replies.push(
+    ...(await handleCustomerQuestion(groupId, message.userId, text, {
+      messageId: message.replyToken,
+      timestamp: message.timestamp,
+    }))
+  );
 
   return { replies, events: await getEventLogs() };
 }

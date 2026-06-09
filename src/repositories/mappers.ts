@@ -47,6 +47,7 @@ export function mapThreadRow(row: Record<string, unknown>): IssueThread {
     consultantAnswered: Boolean(metadata.consultantAnswered),
     lastKnowledgeCardId: row.knowledge_card_id ? String(row.knowledge_card_id) : null,
     customerQuestion: metadata.customerQuestion ? String(metadata.customerQuestion) : null,
+    autoReplyBlocked: Boolean(metadata.autoReplyBlocked),
   };
 }
 
@@ -78,5 +79,6 @@ export function threadToMetadata(thread: Partial<IssueThread>): Record<string, u
   return {
     consultantAnswered: thread.consultantAnswered ?? false,
     customerQuestion: thread.customerQuestion ?? null,
+    autoReplyBlocked: thread.autoReplyBlocked ?? false,
   };
 }

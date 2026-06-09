@@ -108,13 +108,23 @@ describe('Knowledge card Phase 2-A', () => {
     const result = await processMessage({
       userId: TEST_ADMIN,
       groupId: 'group-2a',
-      text: '使用說明',
+      text: '小助手使用說明',
       isGroup: true,
     });
     expect(result.replies[0].text).toBe(GROUP_USAGE_GUIDE);
   });
 
-  it('customer group usage guide does not reply', async () => {
+  it('customer group usage guide replies with store-facing guide', async () => {
+    const result = await processMessage({
+      userId: 'customer-001',
+      groupId: 'group-2a',
+      text: '小助手你會做什麼',
+      isGroup: true,
+    });
+    expect(result.replies.some((r) => r.text === GROUP_USAGE_GUIDE)).toBe(true);
+  });
+
+  it('bare usage guide without 小助手 prefix does not reply in group', async () => {
     const result = await processMessage({
       userId: 'customer-001',
       groupId: 'group-2a',

@@ -18,7 +18,7 @@ import { isActiveAdmin, isActiveConsultantOrAdmin } from './consultantWhitelist'
 import { pauseLastReferencedCard } from './knowledgeBaseService';
 import { summarizeCustomerQuestionForConsultant } from './consultantPrivateAiService';
 import { getActiveIssueThread } from './issueThreadService';
-import { canPauseKnowledgeCard, executeReplyToGroup } from './replyToGroupService';
+import { canPauseKnowledgeCard, executeReplyToGroup, buildReplyToGroupConfirmationText } from './replyToGroupService';
 import {
   formatGroupLabelForHandoff,
   getOpenPendingHandoffs,
@@ -144,20 +144,13 @@ async function requestHighImpactConfirmation(
       {
         type: 'push',
         userId: ctx.userId,
-        text: [
-          '【代回群組確認】',
-          `群組：${formatGroupLabelForHandoff(handoff.groupId, groupName)}`,
-          `問題短碼：${handoff.shortCode}`,
-          '',
-          '【店家問題】',
-          handoff.customerQuestion ?? '（無摘要）',
-          '',
-          '【即將代回群組的內容】',
-          replyPreview,
-          '',
-          '※ 內容會逐字轉貼至群組，不經 LLM 改寫。',
-          '請回覆「確認代回」以執行。',
-        ].join('\n'),
+        text: buildReplyToGroupConfirmationText({
+          groupName,
+          groupId: handoff.groupId,
+          shortCode: handoff.shortCode,
+          customerQuestion: handoff.customerQuestion ?? '（無摘要）',
+          replyText: replyPreview,
+        }),
       },
     ];
   }

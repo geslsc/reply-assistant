@@ -24,7 +24,9 @@ export async function handleConsultantMute(
   return [
     {
       type: 'group',
-      text: mute ? '小助手先休息中,有需要請顧問喚醒。' : '小助手回來了,有需要可以再詢問。',
+      text: mute
+        ? '好的，有需要的話可以隨時叫我回來🙂'
+        : '好的，我隨時待命🙂',
     },
   ];
 }

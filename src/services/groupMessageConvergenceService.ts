@@ -99,6 +99,11 @@ async function processBuffer(
       return [];
     }
 
+    if (thread.autoReplyBlocked || thread.consultantAnswered) {
+      await markBufferResolved(buffer.bufferId);
+      return [];
+    }
+
     let replies: BotReply[];
     if (isHighRiskCustomerMessage(question)) {
       replies = await applyConvergedQuestion({
@@ -200,6 +205,10 @@ export async function handleIncomingCustomerGroupMessage(params: {
   }
 
   const activeThread = await getActiveIssueThread(params.groupId);
+  if (activeThread?.autoReplyBlocked || activeThread?.consultantAnswered) {
+    return [];
+  }
+
   if (activeThread?.state === ThreadState.AI_CLARIFYING) {
     return applyClarifyFollowUp({
       groupId: params.groupId,

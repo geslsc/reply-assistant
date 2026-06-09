@@ -256,14 +256,20 @@ describe('Group message convergence and semantic routing', () => {
     expect(buffer2!.updatedAt >= firstUpdatedAt).toBe(true);
   });
 
-  it('flushes collecting buffer when consultant speaks mid-convergence', async () => {
+  it('does not flush collecting buffer when consultant speaks mid-convergence', async () => {
     resetEnvCache();
     loadEnv({ USE_MEMORY_REPOS: true, DEBOUNCE_SECONDS: 60 });
     clearConvergenceTimersForTest();
 
     await processMessage(groupMsg(TEST_CUSTOMER, '怎麼使用計次券'));
     const result = await processMessage(groupMsg(TEST_CONSULTANT, '我先看一下'));
-    expect(result.replies.find((r) => r.type === 'group')?.text).toContain('步驟一');
+    expect(result.replies.find((r) => r.type === 'group')).toBeUndefined();
+    const buffer = await getRepos().groupMessageBuffers.findCollectingByGroupAndCustomer(
+      TEST_GROUP,
+      TEST_CUSTOMER
+    );
+    expect(buffer).not.toBeNull();
+    expect(buffer!.messages).toHaveLength(1);
   });
 
   it('settles expired buffer on next group event after restart', async () => {

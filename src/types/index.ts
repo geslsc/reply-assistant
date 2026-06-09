@@ -93,6 +93,7 @@ export interface IssueThread {
   consultantAnswered: boolean;
   lastKnowledgeCardId: string | null;
   customerQuestion: string | null;
+  autoReplyBlocked?: boolean;
 }
 
 export interface ConsultantRecord {

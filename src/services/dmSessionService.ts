@@ -40,8 +40,11 @@ import {
 } from './screenshotVisionSummaryService';
 import {
   buildOrganizeContentFromHandoff,
-  consumeHandoffReplyContext,
+  getHandoffReplyContextByShortCode,
   isOrganizeFromHandoffPhrase,
+  ORGANIZE_FROM_HANDOFF_NOT_FOUND_MESSAGE,
+  parseOrganizeFromHandoffPhrase,
+  peekHandoffReplyContext,
 } from './handoffKnowledgeDraftService';
 import {
   parseModifyKnowledgeCardIntent,
@@ -527,12 +530,18 @@ async function handlePublicReplyPreferenceUpdate(
 }
 
 async function handleOrganizeFromHandoff(ctx: DmSessionMessageContext): Promise<BotReply[]> {
-  const context = consumeHandoffReplyContext(ctx.userId);
+  const parsed = parseOrganizeFromHandoffPhrase(ctx.text.trim());
+  if (!parsed) {
+    return pushReply(ctx.userId, ORGANIZE_FROM_HANDOFF_NOT_FOUND_MESSAGE);
+  }
+
+  let context =
+    parsed.mode === 'recent'
+      ? peekHandoffReplyContext(ctx.userId)
+      : getHandoffReplyContextByShortCode(ctx.userId, parsed.shortCode);
+
   if (!context) {
-    return pushReply(
-      ctx.userId,
-      '目前沒有可整理的代回內容。請先完成代回群組，或輸入「幫我整理知識卡」手動整理。'
-    );
+    return pushReply(ctx.userId, ORGANIZE_FROM_HANDOFF_NOT_FOUND_MESSAGE);
   }
 
   const existing = await getActiveSession(ctx.userId);

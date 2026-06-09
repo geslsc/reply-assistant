@@ -110,7 +110,7 @@ describe('Pending Handoffs and Reply To Group', () => {
     });
     expect(result.success).toBe(true);
     const groupPush = result.replies.find((r) => r.type === 'push' && r.userId === TEST_GROUP_B);
-    expect(groupPush?.text).toBe('B群組專用回覆');
+    expect(groupPush?.text).toContain('B群組專用回覆');
     expect(result.replies.some((r) => r.userId === TEST_GROUP && r.text === 'B群組專用回覆')).toBe(false);
   });
 
@@ -132,7 +132,7 @@ describe('Pending Handoffs and Reply To Group', () => {
     expect(result.success).toBe(true);
     expect(result.replies.every((r) => r.type === 'push')).toBe(true);
     const groupPush = result.replies.find((r) => r.type === 'push' && r.userId === TEST_GROUP);
-    expect(groupPush?.text).toBe('請清除快取後再試');
+    expect(groupPush?.text).toContain('請清除快取後再試');
 
     const open = await getOpenPendingHandoffs(TEST_CONSULTANT);
     expect(open.length).toBe(0);

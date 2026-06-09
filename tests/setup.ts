@@ -7,6 +7,8 @@ import { clearKnowledgeCardWriteState } from '../src/services/knowledgeCardWrite
 import { clearBulkImportState } from '../src/services/knowledgeCardImportService';
 import { clearPrivateFallbackState } from '../src/services/privateFallbackHintService';
 import { clearConvergenceTimersForTest } from '../src/services/groupMessageConvergenceService';
+import { clearCorrectionRemindersForTest } from '../src/services/consultantCorrectionService';
+import { clearHandoffReplyContext } from '../src/services/handoffKnowledgeDraftService';
 import { setLineGroupSummaryClient } from '../src/services/lineGroupSummaryService';
 
 beforeEach(async () => {
@@ -24,6 +26,8 @@ beforeEach(async () => {
   clearKnowledgeCardWriteState();
   clearPrivateFallbackState();
   clearBulkImportState();
+  clearCorrectionRemindersForTest();
+  clearHandoffReplyContext();
   await initKnowledgeBase();
   setLineMessageClient({
     replyText: jest.fn().mockResolvedValue(undefined),

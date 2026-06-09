@@ -64,6 +64,67 @@ export async function handleServiceIntroduction(
   return [{ type: 'group', text: INTRO_MESSAGE }];
 }
 
+export async function handleServiceReactivationDirect(
+  groupId: string,
+  consultantUserId: string
+): Promise<BotReply[]> {
+  const now = new Date();
+  const end = new Date(now);
+  end.setDate(end.getDate() + SERVICE_PERIOD_DAYS);
+
+  await updateGroupFlags(groupId, {
+    serviceStartAt: now.toISOString(),
+    serviceEndAt: end.toISOString(),
+    serviceReactivationPending: false,
+  });
+
+  await createEvent({
+    event_type: EventType.STATE_TRANSITION,
+    group_id: groupId,
+    issue_thread_id: null,
+    actor: Actor.CONSULTANT,
+    actor_user_id: consultantUserId,
+    from_state: null,
+    to_state: null,
+    detail: 'service period reactivated via assistant command',
+  });
+
+  const status = await formatServicePeriodStatus(groupId);
+  return [
+    {
+      type: 'group',
+      text: ['已重新啟用教學協助期。', '', status].join('\n'),
+    },
+  ];
+}
+
+export async function formatServicePeriodStatus(groupId: string): Promise<string> {
+  const flags = await getGroupFlags(groupId);
+  if (!flags.serviceStartAt || !flags.serviceEndAt) {
+    return '【群組服務期】\n狀態：尚未啟用';
+  }
+  const start = new Date(flags.serviceStartAt);
+  const end = new Date(flags.serviceEndAt);
+  const now = new Date();
+  const remainingMs = end.getTime() - now.getTime();
+  const remainingDays = Math.max(0, Math.ceil(remainingMs / (1000 * 60 * 60 * 24)));
+  let status = '進行中';
+  if (remainingMs <= 0) {
+    status = '已結束';
+  } else if (now < start) {
+    status = '尚未啟用';
+  }
+  const groupName = flags.groupName ?? groupId;
+  return [
+    '【群組服務期】',
+    `群組：${groupName}`,
+    `服務開始：${start.toISOString().slice(0, 10)}`,
+    `服務結束：${end.toISOString().slice(0, 10)}`,
+    `剩餘天數：${remainingDays} 天`,
+    `狀態：${status}`,
+  ].join('\n');
+}
+
 export async function handleServiceReactivationRequest(
   groupId: string,
   _consultantUserId: string
@@ -122,4 +183,26 @@ export async function getServiceDay(groupId: string): Promise<number | null> {
   const now = new Date();
   const diffMs = now.getTime() - start.getTime();
   return Math.floor(diffMs / (1000 * 60 * 60 * 24)) + 1;
+}
+
+export function parseServicePeriodQuery(
+  text: string
+): { groupName?: string } | null {
+  const trimmed = text.trim();
+  const patterns: RegExp[] = [
+    /^查詢群組服務期$/u,
+    /^查詢服務期\s+(.+)$/u,
+    /^(.+)\s+服務期還剩多久$/u,
+    /^(.+)\s+服務期$/u,
+  ];
+  if (trimmed === '查詢群組服務期') {
+    return {};
+  }
+  for (const pattern of patterns.slice(1)) {
+    const match = trimmed.match(pattern);
+    if (match?.[1]) {
+      return { groupName: match[1].trim() };
+    }
+  }
+  return null;
 }

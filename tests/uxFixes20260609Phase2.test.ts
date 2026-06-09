@@ -361,9 +361,9 @@ describe('UX fixes 2026-06-09 phase 2', () => {
         shortCode: handoff.shortCode,
       });
       expect(result.success).toBe(true);
-      expect(result.replies.some((r) => r.type === 'push' && r.userId === TEST_GROUP && r.text === replyText)).toBe(
-        true
-      );
+      expect(result.replies.some(
+        (r) => r.type === 'push' && r.userId === TEST_GROUP && r.text?.includes(replyText)
+      )).toBe(true);
     });
 
     it('successful reply prompts organize knowledge card draft', async () => {
@@ -380,10 +380,10 @@ describe('UX fixes 2026-06-09 phase 2', () => {
         replyText: '到票券管理新增儲值卡。',
         shortCode: handoff.shortCode,
       });
-      expect(result.replies.some((r) => r.text?.includes('整理成知識卡'))).toBe(true);
+      expect(result.replies.some((r) => r.text?.includes('把剛剛代回整理成知識卡'))).toBe(true);
     });
 
-    it('整理成知識卡 only creates draft without writing DB', async () => {
+    it('把剛剛代回整理成知識卡 only creates draft without writing DB', async () => {
       const beforeCount = await getRepos().knowledgeCards.count();
       storeHandoffReplyContext(TEST_CONSULTANT, {
         groupId: TEST_GROUP,
@@ -397,7 +397,7 @@ describe('UX fixes 2026-06-09 phase 2', () => {
       });
       await handleDmSessionPrivateMessage({
         userId: TEST_CONSULTANT,
-        text: '整理成知識卡',
+        text: '把剛剛代回整理成知識卡',
       });
       const afterCount = await getRepos().knowledgeCards.count();
       expect(afterCount).toBe(beforeCount);

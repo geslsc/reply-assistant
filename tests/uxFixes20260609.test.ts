@@ -10,7 +10,6 @@ import { INTRO_MESSAGE, handleServiceIntroduction } from '../src/services/servic
 import {
   isNannyPeriodApproximatePhrase,
   isNannyPeriodPhrase,
-  NANNY_PERIOD_STANDARD_SYNTAX_HINT,
 } from '../src/services/consultantIntentClassifier';
 import {
   formatHumanReadableKnowledgeCard,
@@ -118,14 +117,14 @@ describe('UX fixes 2026-06-09', () => {
     });
   });
 
-  describe('nanny period approximate syntax hints', () => {
+  describe('deprecated nanny period syntax', () => {
     it('detects approximate phrases without matching standard syntax', () => {
       expect(isNannyPeriodApproximatePhrase('啟用保母期')).toBe(true);
       expect(isNannyPeriodApproximatePhrase('小助手啟用保母期 30 天')).toBe(false);
       expect(isNannyPeriodPhrase('小助手開始協助 30 天')).toBe(true);
     });
 
-    it('replies hint for consultant approximate phrase without enabling service', async () => {
+    it('replies deprecated hint for consultant old phrase without enabling service', async () => {
       const result = await processMessage({
         userId: TEST_CONSULTANT,
         groupId: TEST_GROUP,
@@ -134,12 +133,12 @@ describe('UX fixes 2026-06-09', () => {
         isBotMentioned: false,
         sourceType: 'group',
       });
-      expect(result.replies[0].text).toBe(NANNY_PERIOD_STANDARD_SYNTAX_HINT);
+      expect(result.replies[0].text).toContain('小助手自我介紹一下');
       const flags = await getRepos().groups.getOrCreate(TEST_GROUP);
       expect(flags.serviceStartAt).toBeNull();
     });
 
-    it('formally enables with standard syntax', async () => {
+    it('does not enable with deprecated standard nanny syntax', async () => {
       const result = await processMessage({
         userId: TEST_CONSULTANT,
         groupId: TEST_GROUP,
@@ -148,9 +147,9 @@ describe('UX fixes 2026-06-09', () => {
         isBotMentioned: false,
         sourceType: 'group',
       });
-      expect(result.replies[0].text).toBe(INTRO_MESSAGE);
+      expect(result.replies[0].text).toContain('小助手自我介紹一下');
       const flags = await getRepos().groups.getOrCreate(TEST_GROUP);
-      expect(flags.serviceStartAt).not.toBeNull();
+      expect(flags.serviceStartAt).toBeNull();
     });
 
     it('does not reply to customer approximate phrase', async () => {

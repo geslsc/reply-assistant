@@ -157,7 +157,7 @@ describe('Phase 2-A remediation acceptance tests', () => {
     const result = await processMessage({
       userId: TEST_CONSULTANT,
       groupId: 'group-remediation',
-      text: 'help',
+      text: '小助手使用說明',
       isGroup: true,
     });
     expect(result.replies[0].text).toBe(GROUP_USAGE_GUIDE);
