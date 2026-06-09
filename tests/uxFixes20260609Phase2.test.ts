@@ -137,7 +137,7 @@ describe('UX fixes 2026-06-09 phase 2', () => {
         userId: TEST_CONSULTANT,
         text: '修改：這張知識卡主要是教店家怎麼新增結帳單的操作，並沒有真的涉及帳務問題。',
       });
-      expect(modifyReplies?.[0].text).toMatch(/【知識卡草稿】/);
+      expect(modifyReplies?.[0].text).toMatch(/【知識卡草稿｜/);
 
       const session = await getRepos().dmSessions.findActiveByUserId(TEST_CONSULTANT);
       expect(session?.draftData?.validationStatus).toBe('valid');

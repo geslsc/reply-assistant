@@ -139,7 +139,7 @@ describe('Knowledge card Phase 2-C-1 private screenshot flow', () => {
       userId: TEST_CONSULTANT,
       text: '對，幫我整理成知識卡',
     });
-    expect(draftReplies?.[0].text).toMatch(/【知識卡草稿】/);
+    expect(draftReplies?.[0].text).toMatch(/【知識卡草稿｜/);
     expect(
       (await getRepos().dmSessions.findActiveByUserId(TEST_CONSULTANT))?.draftData?.pendingVisionSummary
     ).toBeUndefined();
@@ -170,7 +170,7 @@ describe('Knowledge card Phase 2-C-1 private screenshot flow', () => {
       userId: TEST_CONSULTANT,
       text: '補充：請加上後台登入步驟',
     });
-    expect(textReplies?.[0].text).toMatch(/【知識卡草稿】/);
+    expect(textReplies?.[0].text).toMatch(/【知識卡草稿｜/);
   });
 
   it('6. missing OPENAI_API_KEY replies AI not enabled and text flow works', async () => {
@@ -190,7 +190,7 @@ describe('Knowledge card Phase 2-C-1 private screenshot flow', () => {
       userId: TEST_CONSULTANT,
       text: '重新整理',
     });
-    expect(textReplies?.[0].text).toMatch(/【知識卡草稿】/);
+    expect(textReplies?.[0].text).toMatch(/【知識卡草稿｜/);
   });
 
   it('7. image buffer is not retained after vision completes', async () => {
@@ -286,7 +286,7 @@ describe('Knowledge card Phase 2-C-1 private screenshot flow', () => {
       text: '對，幫我整理成知識卡',
     });
     const replies = await handleConfirmUpdate({ userId: TEST_ADMIN, text: '確認更新' });
-    expect(replies[0].text).toMatch(/已確認更新/);
+    expect(replies[0].text).toMatch(/已新增知識卡|已更新知識卡/);
     expect(await getRepos().knowledgeCards.findById('phase2c1-card')).not.toBeNull();
     expect(await getRepos().dmSessions.findActiveByUserId(TEST_ADMIN)).toBeNull();
   });

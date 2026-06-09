@@ -13,6 +13,9 @@ import {
   hasMinimumDraftInput,
   INSUFFICIENT_DRAFT_INPUT_MESSAGE,
   NO_ACTIVE_DRAFT_SESSION_MESSAGE,
+  postProcessDraftCard,
+  type DraftSessionContext,
+  type HumanReadableDraftOptions,
 } from './knowledgeCardDraftService';
 import { formatValidationErrorsForHuman } from './knowledgeCardValidationMessages';
 import { enforceKnowledgeCardRules } from './knowledgeCardValidator';
@@ -40,6 +43,15 @@ import {
   consumeHandoffReplyContext,
   isOrganizeFromHandoffPhrase,
 } from './handoffKnowledgeDraftService';
+import {
+  parseModifyKnowledgeCardIntent,
+  resolveExistingKnowledgeCard,
+} from './knowledgeCardDraftModeService';
+import {
+  parsePublicReplyPreferencePhrase,
+  resolveEffectivePublicReplyPreference,
+} from './knowledgeCardPublicReplyService';
+import { PublicReplyPreference } from '../repositories/dmSessionTypes';
 import type { MemoryDmSessionRepository } from '../repositories/memoryDmSessionRepository';
 
 export interface DmSessionMessageContext {
@@ -67,12 +79,18 @@ const EXISTING_SESSION_PROMPT = '您有一份未完成的草稿，要繼續還�
 const START_CONTENT_PROMPT = [
   '請提供以下資訊：',
   '- 店家常問的問題',
-  '- 您建議的回答方式',
-  '- 適用情境',
-  '- 不適用情境',
-  '- 需要轉顧問的情況',
+  '- 您建議的回答方式（可保留步驟與換行）',
+  '- 適用 / 不適用 / 需導入教練協助的情境',
   '',
-  '提供後我會整理成草稿，再請您「確認送出」給 Admin。',
+  '※ 這是新增知識卡模式。若要修改既有卡，請改用「修改知識卡 001」或「修改「標題」這張」。',
+  '',
+  '提供後我會整理成草稿，再請您確認送出或確認更新。',
+].join('\n');
+const MODIFY_CONTENT_PROMPT = [
+  '已進入修改既有知識卡模式。',
+  '請提供要更新的內容，或使用「修改：…」「補充：…」調整草稿。',
+  '',
+  '※ 確認更新後會覆蓋指定的既有知識卡。',
 ].join('\n');
 const EXPIRED_SESSION_MESSAGE =
   '先前的草稿已超過 24 小時未操作，已自動過期。如需重新整理，請輸入「幫我整理知識卡」。';
@@ -131,14 +149,56 @@ function validationSignature(result: Awaited<ReturnType<typeof generateKnowledge
   return result.validation.errors.map((error) => `${error.field}:${error.message}`).join(';');
 }
 
+function buildDraftFormatOptions(
+  session: DmSessionRecord | null | undefined,
+  isAdmin: boolean
+): HumanReadableDraftOptions {
+  return {
+    isAdmin,
+    draftMode: session?.draftData?.draftMode ?? 'create',
+    targetCardId: session?.draftData?.targetCardId,
+    targetCardTitle: session?.draftData?.targetCardTitle,
+    publicReplyPreference: session?.draftData?.publicReplyPreference,
+  };
+}
+
+function buildSessionContext(
+  session: DmSessionRecord,
+  isAdmin: boolean
+): DraftSessionContext {
+  return {
+    draftMode: session.draftData?.draftMode ?? 'create',
+    targetCardId: session.draftData?.targetCardId,
+    targetCardTitle: session.draftData?.targetCardTitle,
+    publicReplyPreference: session.draftData?.publicReplyPreference,
+    isAdmin,
+  };
+}
+
+function mergeSessionDraftMeta(
+  session: DmSessionRecord | null | undefined,
+  draftData: DmSessionDraftData
+): DmSessionDraftData {
+  return {
+    draftMode: draftData.draftMode ?? session?.draftData?.draftMode ?? 'create',
+    targetCardId: draftData.targetCardId ?? session?.draftData?.targetCardId,
+    targetCardTitle: draftData.targetCardTitle ?? session?.draftData?.targetCardTitle,
+    publicReplyPreference:
+      draftData.publicReplyPreference ?? session?.draftData?.publicReplyPreference,
+    publicReplyReason: draftData.publicReplyReason ?? session?.draftData?.publicReplyReason,
+    ...draftData,
+  };
+}
+
 function buildDraftDataFromResult(
   card: KnowledgeCard,
   draftJson: string,
   draftText: string,
   inputNotes?: string,
+  session?: DmSessionRecord | null,
   extra?: Partial<DmSessionDraftData>
 ): DmSessionDraftData {
-  return {
+  return mergeSessionDraftMeta(session ?? null, {
     card,
     draftJson,
     draftText,
@@ -150,7 +210,7 @@ function buildDraftDataFromResult(
     lastValidationSignature: undefined,
     validationFailureCount: 0,
     ...extra,
-  };
+  });
 }
 
 function pushReply(userId: string, text: string): BotReply[] {
@@ -262,6 +322,7 @@ async function applyDraftResult(
   inputNotes?: string
 ): Promise<BotReply[]> {
   const isAdmin = await isActiveAdmin(userId);
+  const formatOptions = buildDraftFormatOptions(session, isAdmin);
   const signature = validationSignature(result);
   const priorSignature = session.draftData?.lastValidationSignature;
   const repeatFailure =
@@ -271,19 +332,27 @@ async function applyDraftResult(
     priorSignature === signature;
 
   if (result.kind === 'single_card' && result.validation.valid && result.validation.normalized) {
-    const draftText = formatDraftReply(result, { isAdmin });
+    const draftText = formatDraftReply(result, {
+      ...formatOptions,
+      isAdmin,
+    });
     const draftData = buildDraftDataFromResult(
       result.validation.normalized,
       result.draftJson ?? JSON.stringify(result.validation.normalized, null, 2),
       draftText,
-      inputNotes ?? session.draftData?.inputNotes
+      inputNotes ?? session.draftData?.inputNotes,
+      session
     );
     await getRepos().dmSessions.updateDraftData(session.sessionId, draftData, nowIso());
   } else if (result.kind === 'single_card') {
     const failureReason = formatValidationErrorsForHuman(result.validation.errors);
     const attemptedCard = result.attemptedCard ?? session.draftData?.lastInvalidDraft ?? session.draftData?.card;
-    const draftText = formatDraftReply(result, { isAdmin, repeatValidationFailure: repeatFailure });
-    const draftData: DmSessionDraftData = {
+    const draftText = formatDraftReply(result, {
+      ...formatOptions,
+      isAdmin,
+      repeatValidationFailure: repeatFailure,
+    });
+    const draftData = mergeSessionDraftMeta(session, {
       draftText,
       humanReadableDraft: draftText,
       inputNotes: inputNotes ?? session.draftData?.inputNotes,
@@ -296,7 +365,7 @@ async function applyDraftResult(
       validationFailureCount: repeatFailure
         ? (session.draftData?.validationFailureCount ?? 1) + 1
         : 1,
-    };
+    });
     await getRepos().dmSessions.updateDraftData(session.sessionId, draftData, nowIso());
   }
 
@@ -304,7 +373,11 @@ async function applyDraftResult(
   return pushReply(
     userId,
     result.kind === 'single_card'
-      ? formatDraftReply(result, { isAdmin, repeatValidationFailure: repeatFailure })
+      ? formatDraftReply(result, {
+          ...formatOptions,
+          isAdmin,
+          repeatValidationFailure: repeatFailure,
+        })
       : formatDraftReply(result)
   );
 }
@@ -320,22 +393,137 @@ async function processContentIntoDraft(
     return pushReply(userId, INSUFFICIENT_DRAFT_INPUT_MESSAGE);
   }
 
+  const isAdmin = await isActiveAdmin(userId);
   const existingCard =
     session.draftData?.card ??
     session.draftData?.lastInvalidDraft ??
+    (session.draftData?.draftMode === 'update' && session.draftData.targetCardId
+      ? session.draftData.card
+      : null) ??
     null;
   const result = await generateKnowledgeCardDraft({
     operation,
     consultantRequest: content,
     existingCard,
+    sessionContext: buildSessionContext(session, isAdmin),
   });
 
-  return applyDraftResult(
-    userId,
-    session,
-    result,
-    inputNotes ?? session.draftData?.inputNotes
-  );
+  return applyDraftResult(userId, session, result, inputNotes ?? session.draftData?.inputNotes);
+}
+
+async function handleStartModifyKnowledgeCard(
+  ctx: DmSessionMessageContext,
+  intent: { reference: string; content?: string }
+): Promise<BotReply[]> {
+  if (!(await isActiveConsultantOrAdmin(ctx.userId))) {
+    return pushReply(ctx.userId, INACTIVE_DRAFT_MESSAGE);
+  }
+
+  const existing = await getActiveSession(ctx.userId);
+  if (existing) {
+    return pushReply(ctx.userId, EXISTING_SESSION_PROMPT);
+  }
+
+  const resolved = await resolveExistingKnowledgeCard(intent.reference);
+  if ('error' in resolved) {
+    return pushReply(ctx.userId, resolved.error);
+  }
+
+  const session = await createActiveSession(ctx.userId, {
+    draftText: '',
+    humanReadableDraft: '',
+    draftMode: 'update',
+    targetCardId: resolved.card.card_id,
+    targetCardTitle: resolved.card.title,
+    card: resolved.card,
+    draftJson: JSON.stringify(resolved.card, null, 2),
+  });
+
+  if (intent.content && hasMinimumDraftInput(intent.content)) {
+    return processContentIntoDraft(ctx.userId, session, intent.content, 'modify');
+  }
+
+  if (intent.content && !hasMinimumDraftInput(intent.content)) {
+    return pushReply(ctx.userId, INSUFFICIENT_DRAFT_INPUT_MESSAGE);
+  }
+
+  resetPrivateFallbackForUser(ctx.userId);
+  return pushReply(ctx.userId, MODIFY_CONTENT_PROMPT);
+}
+
+async function handlePublicReplyPreferenceUpdate(
+  ctx: DmSessionMessageContext,
+  preference: PublicReplyPreference
+): Promise<BotReply[]> {
+  const session = await getActiveSession(ctx.userId);
+  const card = session?.draftData?.card ?? session?.draftData?.lastInvalidDraft;
+  if (!session || !card) {
+    suppressPrivateFallbackForUser(ctx.userId);
+    return pushReply(ctx.userId, NO_ACTIVE_DRAFT_SESSION_MESSAGE);
+  }
+
+  const isAdmin = await isActiveAdmin(ctx.userId);
+  const effectivePreference = resolveEffectivePublicReplyPreference({
+    preference,
+    isAdmin,
+  });
+  const processedCard = postProcessDraftCard(card, {
+    ...buildSessionContext(session, isAdmin),
+    publicReplyPreference: effectivePreference,
+  });
+  const validation = enforceKnowledgeCardRules(processedCard);
+  const formatOptions = buildDraftFormatOptions(session, isAdmin);
+  const draftData = mergeSessionDraftMeta(session, {
+    ...(session.draftData ?? { draftText: '', humanReadableDraft: '' }),
+    publicReplyPreference: effectivePreference,
+    publicReplyReason:
+      preference === 'suggest_public' || effectivePreference === 'admin_public'
+        ? '使用者要求設為可公開回答'
+        : '使用者要求設為導入教練參考',
+  });
+
+  if (validation.valid && validation.normalized) {
+    const result = {
+      kind: 'single_card' as const,
+      operation: 'modify' as const,
+      validation,
+      draftJson: JSON.stringify(validation.normalized, null, 2),
+      reasonText: null,
+    };
+    const draftText = formatDraftReply(result, { ...formatOptions, isAdmin });
+    await getRepos().dmSessions.updateDraftData(
+      session.sessionId,
+      buildDraftDataFromResult(
+        validation.normalized,
+        JSON.stringify(validation.normalized, null, 2),
+        draftText,
+        session.draftData?.inputNotes,
+        session,
+        draftData
+      ),
+      nowIso()
+    );
+    suppressPrivateFallbackForUser(ctx.userId);
+    return pushReply(ctx.userId, draftText);
+  }
+
+  draftData.validationStatus = 'failed';
+  draftData.validationFailureReason = formatValidationErrorsForHuman(validation.errors);
+  draftData.lastInvalidDraft = processedCard;
+  draftData.card = undefined;
+  const failureReply = [
+    '【驗證失敗】',
+    formatValidationErrorsForHuman(validation.errors),
+    '',
+    isAdmin
+      ? '此內容命中硬紅線，無法設為可公開回答。'
+      : '已記錄您的建議，但內容仍無法設為可公開回答，需 Admin 覆核或調整草稿。',
+  ].join('\n');
+  draftData.draftText = failureReply;
+  draftData.humanReadableDraft = failureReply;
+  await getRepos().dmSessions.updateDraftData(session.sessionId, draftData, nowIso());
+  suppressPrivateFallbackForUser(ctx.userId);
+  return pushReply(ctx.userId, failureReply);
 }
 
 async function handleOrganizeFromHandoff(ctx: DmSessionMessageContext): Promise<BotReply[]> {
@@ -352,7 +540,11 @@ async function handleOrganizeFromHandoff(ctx: DmSessionMessageContext): Promise<
     return pushReply(ctx.userId, EXISTING_SESSION_PROMPT);
   }
 
-  const session = await createActiveSession(ctx.userId);
+  const session = await createActiveSession(ctx.userId, {
+    draftText: '',
+    humanReadableDraft: '',
+    draftMode: 'create',
+  });
   return processContentIntoDraft(
     ctx.userId,
     session,
@@ -373,12 +565,20 @@ async function handleStartOrganize(ctx: DmSessionMessageContext): Promise<BotRep
 
   const content = extractOrganizeContent(ctx.text);
   if (isBareOrganizeStart(ctx.text) || content.length === 0) {
-    await createActiveSession(ctx.userId);
+    await createActiveSession(ctx.userId, {
+      draftText: '',
+      humanReadableDraft: '',
+      draftMode: 'create',
+    });
     resetPrivateFallbackForUser(ctx.userId);
     return pushReply(ctx.userId, START_CONTENT_PROMPT);
   }
 
-  const session = await createActiveSession(ctx.userId);
+  const session = await createActiveSession(ctx.userId, {
+    draftText: '',
+    humanReadableDraft: '',
+    draftMode: 'create',
+  });
   return processContentIntoDraft(ctx.userId, session, content, 'create');
 }
 
@@ -415,7 +615,10 @@ async function handleRegenerate(ctx: DmSessionMessageContext): Promise<BotReply[
     return pushReply(ctx.userId, '目前沒有可重新整理的草稿內容，請先提供知識卡內容。');
   }
   const isAdmin = await isActiveAdmin(ctx.userId);
-  const humanReadable = formatHumanReadableKnowledgeCard(card, { isAdmin });
+  const humanReadable = formatHumanReadableKnowledgeCard(
+    card,
+    buildDraftFormatOptions(session, isAdmin)
+  );
   const draftData: DmSessionDraftData = {
     ...session.draftData,
     humanReadableDraft: humanReadable,
@@ -585,6 +788,13 @@ export async function storeSessionDraftFromRevision(
   });
 }
 
+export async function getActiveSessionDraftMode(
+  userId: string
+): Promise<'create' | 'update' | undefined> {
+  const session = await getActiveSession(userId);
+  return session?.draftData?.draftMode;
+}
+
 export async function markSessionCompleted(userId: string): Promise<void> {
   const session = await getActiveSession(userId);
   if (session) {
@@ -596,6 +806,11 @@ export async function handleDmSessionPrivateMessage(
   ctx: DmSessionMessageContext
 ): Promise<BotReply[] | null> {
   const trimmed = ctx.text.trim();
+
+  const modifyIntent = parseModifyKnowledgeCardIntent(trimmed);
+  if (modifyIntent) {
+    return handleStartModifyKnowledgeCard(ctx, modifyIntent);
+  }
 
   if (isOrganizeStart(trimmed)) {
     return handleStartOrganize(ctx);
@@ -616,6 +831,11 @@ export async function handleDmSessionPrivateMessage(
 
   if (trimmed === EXPORT_JSON_PHRASE) {
     return handleExportJson(ctx);
+  }
+
+  const publicReplyPreference = parsePublicReplyPreferencePhrase(trimmed);
+  if (publicReplyPreference) {
+    return handlePublicReplyPreferenceUpdate(ctx, publicReplyPreference);
   }
 
   if (trimmed === REGENERATE_PHRASE) {
@@ -722,13 +942,28 @@ export async function seedActiveSessionForTest(params: {
   card?: KnowledgeCard;
   draftText?: string;
   updatedAt?: string;
+  draftMode?: 'create' | 'update';
+  targetCardId?: string;
+  targetCardTitle?: string;
 }): Promise<DmSessionRecord> {
   const updatedAt = params.updatedAt ?? nowIso();
   const draftData: DmSessionDraftData | null = params.card
     ? buildDraftDataFromResult(
         params.card,
         JSON.stringify(params.card, null, 2),
-        params.draftText ?? formatHumanReadableKnowledgeCard(params.card)
+        params.draftText ??
+          formatHumanReadableKnowledgeCard(params.card, {
+            draftMode: params.draftMode ?? 'create',
+            targetCardId: params.targetCardId,
+            targetCardTitle: params.targetCardTitle,
+          }),
+        undefined,
+        null,
+        {
+          draftMode: params.draftMode ?? 'create',
+          targetCardId: params.targetCardId,
+          targetCardTitle: params.targetCardTitle,
+        }
       )
     : null;
   return getRepos().dmSessions.create({

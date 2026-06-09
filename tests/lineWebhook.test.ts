@@ -170,7 +170,7 @@ describe('LINE Webhook Tests', () => {
       .send(body)
       .expect(200);
 
-    await expect(pushed).resolves.toContain('【知識卡草稿】');
+    await expect(pushed).resolves.toContain('【知識卡草稿｜');
   });
 
   it('routes private image event to handlePrivateImageMessage in background', async () => {

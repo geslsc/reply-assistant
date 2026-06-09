@@ -221,7 +221,7 @@ describe('UX fixes 2026-06-09', () => {
   describe('human readable draft and validator messages', () => {
     it('default draft hides internal field names', () => {
       const text = formatHumanReadableKnowledgeCard(billingDisplayCard);
-      expect(text).toMatch(/【知識卡草稿】/);
+      expect(text).toMatch(/【知識卡草稿｜/);
       expect(text).toMatch(/主題：/);
       expect(text).not.toMatch(/risk_level/);
       expect(text).not.toMatch(/can_public_reply/);
@@ -280,7 +280,7 @@ describe('UX fixes 2026-06-09', () => {
         userId: TEST_ADMIN,
         text: '確認更新',
       });
-      expect(replies?.[0].text).toMatch(/已確認更新/);
+      expect(replies?.[0].text).toMatch(/已新增知識卡|已更新知識卡/);
     });
 
     it('rejects consultant 確認更新 during active session', async () => {

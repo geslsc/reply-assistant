@@ -34,10 +34,15 @@ import {
   storeSessionDraftFromRevision,
   setForceSubmitFailureForTest,
   getActiveSession,
+  getActiveSessionDraftMode,
 } from './dmSessionService';
 import { NO_ACTIVE_DRAFT_SESSION_MESSAGE } from './knowledgeCardDraftService';
 import { suppressPrivateFallbackForUser } from './privateFallbackHintService';
 import { getRepos } from '../repositories';
+import { KnowledgeCard } from '../schemas/knowledgeCardSchema';
+import { isPlaceholderCardId } from './knowledgeCardIdService';
+import { buildConfirmSuccessPublicReplyNote } from './knowledgeCardPublicReplyService';
+import { KnowledgeDraftMode } from './knowledgeCardDraftModeService';
 
 export const CONFIRM_SUBMIT_PHRASE = '確認送出';
 export const CONFIRM_UPDATE_PHRASES = ['確認更新', '确认更新'] as const;
@@ -135,6 +140,14 @@ export function isRejectCommand(text: string): boolean {
   return parseRejectCommand(text) !== null;
 }
 
+async function inferDraftModeForWrite(card: KnowledgeCard): Promise<KnowledgeDraftMode> {
+  if (isPlaceholderCardId(card.card_id)) {
+    return 'create';
+  }
+  const existing = await getRepos().knowledgeCards.findById(card.card_id);
+  return existing ? 'update' : 'create';
+}
+
 async function writeValidatedCard(
   card: Parameters<typeof writeKnowledgeCardWithValidation>[0]['card'],
   operatorUserId: string,
@@ -145,8 +158,12 @@ async function writeValidatedCard(
   options?: {
     logValidationFailure?: boolean;
     buildFailureMessage?: (params: { cardId: string; error: string }) => string;
+    draftMode?: KnowledgeDraftMode;
   }
-): Promise<{ ok: true; cardId: string } | { ok: false; replies: BotReply[] }> {
+): Promise<
+  | { ok: true; cardId: string; title: string; effectiveOperation: 'create' | 'update' }
+  | { ok: false; replies: BotReply[] }
+> {
   const result = await writeKnowledgeCardWithValidation({
     card,
     operatorUserId,
@@ -155,6 +172,7 @@ async function writeValidatedCard(
     validationOperation,
     reviewShortCode,
     logValidationFailure: options?.logValidationFailure,
+    draftMode: options?.draftMode,
   });
   if (!result.ok) {
     const error = result.error ?? '未知錯誤';
@@ -172,7 +190,12 @@ async function writeValidatedCard(
       ],
     };
   }
-  return { ok: true, cardId: result.cardId };
+  return {
+    ok: true,
+    cardId: result.cardId,
+    title: card.title,
+    effectiveOperation: result.effectiveOperation ?? 'create',
+  };
 }
 
 function buildOwnDraftConfirmValidationFailureMessage(params: {
@@ -359,6 +382,9 @@ export async function handleConfirmUpdate(ctx: AdminActionContext): Promise<BotR
   }
 
   const isOwnDraft = Boolean(resolved.ownDraft);
+  const ownDraftMode = isOwnDraft ? await getActiveSessionDraftMode(ctx.userId) : undefined;
+  const draftMode =
+    ownDraftMode ?? (await inferDraftModeForWrite(card));
 
   const writeResult = await writeValidatedCard(
     card,
@@ -371,12 +397,18 @@ export async function handleConfirmUpdate(ctx: AdminActionContext): Promise<BotR
       ? {
           logValidationFailure: false,
           buildFailureMessage: buildOwnDraftConfirmValidationFailureMessage,
+          draftMode,
         }
-      : undefined
+      : { draftMode }
   );
   if (!writeResult.ok) {
     return writeResult.replies;
   }
+
+  const writtenCard = {
+    ...card,
+    card_id: writeResult.cardId,
+  };
 
   if (resolved.review) {
     await markReviewApproved(resolved.review.reviewId, ctx.userId);
@@ -384,11 +416,16 @@ export async function handleConfirmUpdate(ctx: AdminActionContext): Promise<BotR
     await markSessionCompleted(ctx.userId);
   }
 
+  const actionLabel =
+    writeResult.effectiveOperation === 'update' ? '已更新知識卡' : '已新增知識卡';
   const replies: BotReply[] = [
     {
       type: 'push',
       userId: ctx.userId,
-      text: `已確認更新，知識卡「${writeResult.cardId}」已寫入 DB 並記錄 event_log。`,
+      text: [
+        `${actionLabel}「${writeResult.cardId}｜${writeResult.title}」並寫入知識庫。`,
+        buildConfirmSuccessPublicReplyNote(writtenCard),
+      ].join('\n'),
     },
   ];
 
@@ -400,7 +437,10 @@ export async function handleConfirmUpdate(ctx: AdminActionContext): Promise<BotR
     replies.push({
       type: 'push',
       userId: notifyConsultantId,
-      text: `admin 已確認更新您的知識卡草稿（${writeResult.cardId}），正式生效。`,
+      text: [
+        `admin 已確認更新您的知識卡草稿（${writeResult.cardId}｜${writeResult.title}），正式生效。`,
+        buildConfirmSuccessPublicReplyNote(writtenCard),
+      ].join('\n'),
     });
   }
 

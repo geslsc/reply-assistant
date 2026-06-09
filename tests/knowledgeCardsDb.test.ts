@@ -152,7 +152,7 @@ describe('Knowledge card two-step confirmation', () => {
   it('admin confirm update with own draft writes DB and event_log', async () => {
     await storeUserDraft(TEST_ADMIN, sampleCard, JSON.stringify(sampleCard), 'admin draft');
     const replies = await handleConfirmUpdate({ userId: TEST_ADMIN, text: '確認更新' });
-    expect(replies[0].text).toMatch(/已確認更新/);
+    expect(replies[0].text).toMatch(/已新增知識卡|已更新知識卡/);
     const record = await getRepos().knowledgeCards.findById(sampleCard.card_id);
     expect(record?.confirmedBy).toBe(TEST_ADMIN);
     const events = await getRepos().events.findByType(EventType.CONSULTANT_OVERRIDE);
@@ -212,7 +212,7 @@ describe('Knowledge card two-step confirmation', () => {
       shortCode: 'K-20260608-A1',
     });
     const replies = await handleConfirmUpdate({ userId: TEST_ADMIN, text: '確認更新' });
-    expect(replies[0].text).toMatch(/已確認更新/);
+    expect(replies[0].text).toMatch(/已新增知識卡|已更新知識卡/);
   });
 
   it('resolves draft by quotedMessageId', async () => {
@@ -231,7 +231,7 @@ describe('Knowledge card two-step confirmation', () => {
       text: '確認更新',
       quotedMessageId: 'quoted-msg-001',
     });
-    expect(replies[0].text).toMatch(/已確認更新/);
+    expect(replies[0].text).toMatch(/已新增知識卡|已更新知識卡/);
   });
 
   it('prefers short code over quotedMessageId when conflict', async () => {

@@ -70,6 +70,7 @@ export async function handleResumeKnowledgeCard(
     operation: 'resume',
     summary: 'resume knowledge card',
     validationOperation: 'resume',
+    draftMode: 'update',
   });
 
   if (!result.ok) {

@@ -3,8 +3,16 @@ import {
   KnowledgeCard,
 } from '../schemas/knowledgeCardSchema';
 import { RiskLevel } from '../types';
+import { DmSessionDraftData, PublicReplyPreference } from '../repositories/dmSessionTypes';
 import { cardContainsSensitiveContent, enforceKnowledgeCardRules, ValidationResult } from './knowledgeCardValidator';
 import { formatValidationErrorsForHuman } from './knowledgeCardValidationMessages';
+import { KnowledgeDraftMode } from './knowledgeCardDraftModeService';
+import { isPlaceholderCardId, PENDING_CARD_ID, formatCardDisplayId } from './knowledgeCardIdService';
+import {
+  applyPublicReplyPreference,
+  describeAppliedPublicReplyState,
+  resolveEffectivePublicReplyPreference,
+} from './knowledgeCardPublicReplyService';
 
 export type KnowledgeDraftOperation =
   | 'create'
@@ -57,13 +65,47 @@ function parseJsonOnly(text: string): unknown {
 function buildUserPrompt(
   operation: KnowledgeDraftOperation,
   consultantRequest: string,
-  existingCard?: KnowledgeCard | null
+  existingCard?: KnowledgeCard | null,
+  draftMode?: KnowledgeDraftMode
 ): string {
   const base = `顧問要求：${consultantRequest}`;
-  if (existingCard && (operation === 'modify' || operation === 'supplement')) {
-    return `${base}\n\n現有知識卡：\n${JSON.stringify(existingCard, null, 2)}`;
+  const modeHint =
+    draftMode === 'update'
+      ? '這是修改既有知識卡，請保留 card_id 不變，並保留 standard_answer 的段落與換行。'
+      : '這是新增知識卡，card_id 請填 "__pending__"。';
+  if (existingCard && (operation === 'modify' || operation === 'supplement' || draftMode === 'update')) {
+    return `${base}\n\n${modeHint}\n\n現有知識卡：\n${JSON.stringify(existingCard, null, 2)}`;
   }
-  return base;
+  return `${base}\n\n${modeHint}`;
+}
+
+export interface DraftSessionContext {
+  draftMode?: KnowledgeDraftMode;
+  targetCardId?: string;
+  targetCardTitle?: string;
+  publicReplyPreference?: PublicReplyPreference;
+  isAdmin?: boolean;
+}
+
+export function postProcessDraftCard(
+  card: KnowledgeCard,
+  context: DraftSessionContext
+): KnowledgeCard {
+  let processed: KnowledgeCard = { ...card };
+
+  if (context.draftMode === 'update' && context.targetCardId) {
+    processed.card_id = context.targetCardId;
+  } else if (context.draftMode !== 'update' && isPlaceholderCardId(processed.card_id)) {
+    processed.card_id = PENDING_CARD_ID;
+  }
+
+  const effectivePreference = resolveEffectivePublicReplyPreference({
+    preference: context.publicReplyPreference,
+    isAdmin: context.isAdmin ?? false,
+  });
+  processed = applyPublicReplyPreference(processed, effectivePreference);
+
+  return processed;
 }
 
 function buildSplitMergeSuggestion(operation: 'split' | 'merge', consultantRequest: string): string {
@@ -83,8 +125,9 @@ export async function generateKnowledgeCardDraft(params: {
   consultantRequest: string;
   existingCard?: KnowledgeCard | null;
   updatedReason?: string;
+  sessionContext?: DraftSessionContext;
 }): Promise<KnowledgeDraftResult> {
-  const { operation, consultantRequest, existingCard, updatedReason } = params;
+  const { operation, consultantRequest, existingCard, updatedReason, sessionContext } = params;
 
   if (operation === 'split' || operation === 'merge') {
     return {
@@ -124,7 +167,12 @@ export async function generateKnowledgeCardDraft(params: {
     };
   }
 
-  const userPrompt = buildUserPrompt(operation, consultantRequest, existingCard);
+  const userPrompt = buildUserPrompt(
+    operation,
+    consultantRequest,
+    existingCard,
+    sessionContext?.draftMode
+  );
   const rawLlmOutput = await client.complete(KNOWLEDGE_CARD_LLM_SYSTEM_PROMPT, userPrompt);
   let parsed: unknown;
   try {
@@ -147,11 +195,11 @@ export async function generateKnowledgeCardDraft(params: {
     };
   }
 
-  const validation = enforceKnowledgeCardRules(parsed);
   const attemptedCard =
     typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
-      ? (parsed as KnowledgeCard)
+      ? postProcessDraftCard(parsed as KnowledgeCard, sessionContext ?? {})
       : null;
+  const validation = enforceKnowledgeCardRules(attemptedCard ?? parsed);
   if (!validation.valid || !validation.normalized) {
     return {
       kind: 'single_card',
@@ -163,11 +211,24 @@ export async function generateKnowledgeCardDraft(params: {
     };
   }
 
-  const draftJson = JSON.stringify(validation.normalized, null, 2);
+  const normalized = postProcessDraftCard(validation.normalized, sessionContext ?? {});
+  const finalValidation = enforceKnowledgeCardRules(normalized);
+  if (!finalValidation.valid || !finalValidation.normalized) {
+    return {
+      kind: 'single_card',
+      operation,
+      validation: finalValidation,
+      draftJson: JSON.stringify(normalized, null, 2),
+      reasonText: updatedReason ?? null,
+      attemptedCard: normalized,
+    };
+  }
+
+  const draftJson = JSON.stringify(finalValidation.normalized, null, 2);
   return {
     kind: 'single_card',
     operation,
-    validation,
+    validation: finalValidation,
     draftJson,
     reasonText: updatedReason ?? null,
   };
@@ -196,6 +257,8 @@ export function formatDraftActionHints(isAdmin: boolean): string {
     '您可以回覆：',
     '- 補充：...',
     '- 修改：...',
+    '- 設為可公開回答',
+    '- 設為導入教練參考',
     '- 轉成 JSON',
   ];
   if (isAdmin) {
@@ -206,14 +269,33 @@ export function formatDraftActionHints(isAdmin: boolean): string {
   return lines.join('\n');
 }
 
+export interface HumanReadableDraftOptions {
+  isAdmin?: boolean;
+  draftMode?: KnowledgeDraftMode;
+  targetCardId?: string;
+  targetCardTitle?: string;
+  publicReplyPreference?: PublicReplyPreference;
+}
+
+function buildDraftHeader(options?: HumanReadableDraftOptions): string[] {
+  if (options?.draftMode === 'update' && options.targetCardId) {
+    const displayId = formatCardDisplayId(options.targetCardId);
+    const title = options.targetCardTitle ?? '（未知標題）';
+    return [
+      '【知識卡草稿｜修改】',
+      `將更新既有知識卡：${displayId}｜${title}`,
+      '※ 確認更新後會覆蓋這張知識卡。',
+    ];
+  }
+  return ['【知識卡草稿｜新增】', '※ 草稿不會自動生效。'];
+}
+
 export function formatHumanReadableKnowledgeCard(
   card: KnowledgeCard,
-  options?: { isAdmin?: boolean }
+  options?: HumanReadableDraftOptions
 ): string {
-  const isAdmin = options?.isAdmin ?? false;
   const lines: string[] = [
-    '【知識卡草稿】',
-    '※ 草稿不會自動生效。',
+    ...buildDraftHeader(options),
     '',
     '主題：',
     card.title,
@@ -221,7 +303,7 @@ export function formatHumanReadableKnowledgeCard(
     '店家可能會這樣問：',
     ...card.patterns.map((pattern) => `- ${pattern}`),
     '',
-    '建議回覆方向：',
+    '建議回覆內容：',
     card.standard_answer,
   ];
 
@@ -237,8 +319,15 @@ export function formatHumanReadableKnowledgeCard(
     );
   }
 
-  lines.push('', '小助手是否會自動公開回答：', describeAutoPublicReply(card));
-  lines.push('', formatDraftActionHints(isAdmin));
+  lines.push(
+    '',
+    describeAppliedPublicReplyState({
+      card,
+      preference: options?.publicReplyPreference,
+      isAdmin: options?.isAdmin ?? false,
+    })
+  );
+  lines.push('', formatDraftActionHints(options?.isAdmin ?? false));
   return lines.join('\n');
 }
 
@@ -329,7 +418,14 @@ export function hasMinimumDraftInput(text: string): boolean {
 /** 格式化草稿回覆文字；修改原因只寫在文字，不進 JSON */
 export function formatDraftReply(
   result: KnowledgeDraftResult,
-  options?: { isAdmin?: boolean; repeatValidationFailure?: boolean }
+  options?: {
+    isAdmin?: boolean;
+    repeatValidationFailure?: boolean;
+    draftMode?: KnowledgeDraftMode;
+    targetCardId?: string;
+    targetCardTitle?: string;
+    publicReplyPreference?: PublicReplyPreference;
+  }
 ): string {
   if (result.kind === 'suggestion_only') {
     return result.text;
@@ -344,7 +440,7 @@ export function formatDraftReply(
   if (!result.validation.valid || !result.validation.normalized) {
     if (options?.repeatValidationFailure) {
       lines.push(
-        '這份草稿仍未通過驗證，我已保留草稿。請再用「修改：…」補充它只是操作教學，或移除金額/帳務相關內容。'
+        '這份草稿仍未通過驗證，我已保留草稿。請再用「修改：…」調整內容，或使用「設為可公開回答／設為導入教練參考」覆核。'
       );
       return lines.join('\n');
     }
@@ -352,7 +448,15 @@ export function formatDraftReply(
     return lines.join('\n');
   }
 
-  lines.push(formatHumanReadableKnowledgeCard(result.validation.normalized, { isAdmin: options?.isAdmin }));
+  lines.push(
+    formatHumanReadableKnowledgeCard(result.validation.normalized, {
+      isAdmin: options?.isAdmin,
+      draftMode: options?.draftMode,
+      targetCardId: options?.targetCardId,
+      targetCardTitle: options?.targetCardTitle,
+      publicReplyPreference: options?.publicReplyPreference,
+    })
+  );
   return lines.join('\n');
 }
 

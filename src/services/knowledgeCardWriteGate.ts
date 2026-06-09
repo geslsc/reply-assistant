@@ -9,6 +9,8 @@ import {
 import { getRepos } from '../repositories';
 import { knowledgeCardToDbFields } from '../schemas/knowledgeCardDbSchema';
 import { refreshKnowledgeCache } from './knowledgeBaseService';
+import { allocateUniqueCardId, isPlaceholderCardId } from './knowledgeCardIdService';
+import { KnowledgeDraftMode } from './knowledgeCardDraftModeService';
 
 export interface ValidatedWriteResult {
   ok: boolean;
@@ -30,6 +32,7 @@ export async function writeKnowledgeCardWithValidation(params: {
   validationOperation?: string;
   reviewShortCode?: string;
   logValidationFailure?: boolean;
+  draftMode?: KnowledgeDraftMode;
 }): Promise<ValidatedWriteResult> {
   const validation = validateKnowledgeCardForWrite(params.card);
   if (!validation.valid || !validation.normalized) {
@@ -51,13 +54,41 @@ export async function writeKnowledgeCardWithValidation(params: {
     };
   }
 
-  const card = validation.normalized;
+  let card = validation.normalized;
   const now = new Date().toISOString();
-  const fields = knowledgeCardToDbFields(card);
-  const existing = await getRepos().knowledgeCards.findById(card.card_id);
-  const effectiveOperation = existing ? 'update' : 'create';
+  const draftMode = params.draftMode ?? (isPlaceholderCardId(card.card_id) ? 'create' : undefined);
+  let effectiveOperation: 'create' | 'update';
 
-  if (existing) {
+  if (draftMode === 'update') {
+    const existing = await getRepos().knowledgeCards.findById(card.card_id);
+    if (!existing) {
+      return {
+        ok: false,
+        cardId: card.card_id,
+        error: `找不到要更新的知識卡「${card.card_id}」。`,
+      };
+    }
+    effectiveOperation = 'update';
+  } else {
+    if (isPlaceholderCardId(card.card_id)) {
+      card = { ...card, card_id: await allocateUniqueCardId() };
+      effectiveOperation = 'create';
+    } else {
+      const existing = await getRepos().knowledgeCards.findById(card.card_id);
+      if (existing) {
+        return {
+          ok: false,
+          cardId: card.card_id,
+          error: `card_id「${card.card_id}」已存在。新增模式不得覆蓋既有知識卡，請改用「修改知識卡 ${card.card_id}」或重新整理草稿。`,
+        };
+      }
+      effectiveOperation = 'create';
+    }
+  }
+
+  const fields = knowledgeCardToDbFields(card);
+
+  if (effectiveOperation === 'update') {
     await getRepos().knowledgeCards.update(card.card_id, {
       ...fields,
       updatedBy: params.operatorUserId,

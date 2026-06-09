@@ -114,7 +114,7 @@ npm run db:migrate:knowledge           # 3. 正式灌入 knowledge_cards
 
 Consultant 另可：`查看待處理問題`、`稍後處理`、代回後 `整理成知識卡`。
 
-Consultant / Admin 私訊多步驟草稿：`幫我整理知識卡` → 提供內容 → 補充 / 修改 / 重新整理 / 轉成 JSON → consultant「確認送出」或 admin「確認更新」（兩者不可混用）。驗證失敗時草稿保留，請用「修改：…」調整。Consultant 不可匯出 / 批量匯入 / 確認更新。
+Consultant / Admin 私訊多步驟草稿：`幫我整理知識卡`（預設新增）或 `修改知識卡 [card_id]`（修改既有）→ 提供內容 → 補充 / 修改 / 設為可公開回答 / 設為導入教練參考 / 轉成 JSON → consultant「確認送出」或 admin「確認更新」。新增模式由系統分配唯一 card_id，不覆蓋舊卡。
 
 私訊 `使用說明` / `help` 可取得 Admin 或 Consultant 版指令說明（依身份分流）。
 

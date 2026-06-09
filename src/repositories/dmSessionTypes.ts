@@ -4,6 +4,12 @@ export type DmSessionType = 'knowledge_draft';
 
 export type DmSessionStatus = 'active' | 'submitted' | 'completed' | 'cancelled' | 'expired';
 
+export type PublicReplyPreference =
+  | 'suggest_public'
+  | 'suggest_consultant'
+  | 'admin_public'
+  | 'admin_consultant';
+
 export interface DmSessionDraftData {
   card?: KnowledgeCard;
   draftJson?: string | null;
@@ -19,6 +25,12 @@ export interface DmSessionDraftData {
   lastInvalidDraft?: KnowledgeCard;
   lastValidationSignature?: string;
   validationFailureCount?: number;
+  /** 新增 create（預設）或修改 update 既有卡 */
+  draftMode?: 'create' | 'update';
+  targetCardId?: string;
+  targetCardTitle?: string;
+  publicReplyPreference?: PublicReplyPreference;
+  publicReplyReason?: string;
 }
 
 export interface DmSessionRecord {
