@@ -5,6 +5,7 @@
 
 CREATE TABLE IF NOT EXISTS group_flags (
   group_id TEXT PRIMARY KEY,
+  group_name TEXT,
   waiting_flag BOOLEAN NOT NULL DEFAULT FALSE,
   waiting_flag_set_at TIMESTAMPTZ,
   mute BOOLEAN NOT NULL DEFAULT FALSE,
@@ -118,6 +119,7 @@ CREATE TABLE IF NOT EXISTS consultants (
 );
 
 ALTER TABLE consultants ADD COLUMN IF NOT EXISTS last_knowledge_export_at TIMESTAMPTZ;
+ALTER TABLE group_flags ADD COLUMN IF NOT EXISTS group_name TEXT;
 
 CREATE TABLE IF NOT EXISTS knowledge_cards (
   card_id TEXT PRIMARY KEY,

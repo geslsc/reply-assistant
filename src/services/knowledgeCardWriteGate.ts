@@ -1,5 +1,6 @@
 import { KnowledgeCard } from '../schemas/knowledgeCardSchema';
 import { validateKnowledgeCard, ValidationResult } from './knowledgeCardValidator';
+import { formatValidationFailureSummary } from './knowledgeCardValidationMessages';
 import {
   logKnowledgeCardValidationFailure,
   logKnowledgeCardWrite,
@@ -33,6 +34,7 @@ export async function writeKnowledgeCardWithValidation(params: {
   const validation = validateKnowledgeCardForWrite(params.card);
   if (!validation.valid || !validation.normalized) {
     const reasons = validation.errors.map((e) => `${e.field}: ${e.message}`);
+    const humanError = formatValidationFailureSummary(validation.errors);
     if (params.logValidationFailure !== false) {
       await logKnowledgeCardValidationFailure({
         cardId: params.card.card_id,
@@ -44,7 +46,7 @@ export async function writeKnowledgeCardWithValidation(params: {
     return {
       ok: false,
       cardId: params.card.card_id,
-      error: reasons.join('; '),
+      error: humanError,
       reasons,
     };
   }

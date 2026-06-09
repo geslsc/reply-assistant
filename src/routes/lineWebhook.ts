@@ -150,6 +150,9 @@ export async function handleLineWebhook(req: Request, res: Response): Promise<vo
       }
 
       if (mapped === 'non_text') {
+        if (event.source.type === 'group') {
+          continue;
+        }
         if (event.replyToken) {
           await deliverBotReplies(
             [{ type: 'group', text: '請用文字描述問題,顧問比較好協助喔。' }],
@@ -161,12 +164,6 @@ export async function handleLineWebhook(req: Request, res: Response): Promise<vo
 
       if (isIncomingImageMessage(mapped)) {
         if (mapped.isGroup) {
-          if (mapped.replyToken) {
-            await deliverBotReplies(
-              [{ type: 'group', text: '請用文字描述問題,顧問比較好協助喔。' }],
-              mapped.replyToken
-            );
-          }
           continue;
         }
 

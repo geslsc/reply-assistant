@@ -6,6 +6,7 @@ import { clearAllPendingConfirmations } from '../src/services/consultantConfirma
 import { clearKnowledgeCardWriteState } from '../src/services/knowledgeCardWriteService';
 import { clearBulkImportState } from '../src/services/knowledgeCardImportService';
 import { clearPrivateFallbackState } from '../src/services/privateFallbackHintService';
+import { setLineGroupSummaryClient } from '../src/services/lineGroupSummaryService';
 
 beforeEach(async () => {
   resetEnvCache();
@@ -25,4 +26,5 @@ beforeEach(async () => {
     replyText: jest.fn().mockResolvedValue(undefined),
     pushText: jest.fn().mockImplementation(async (_userId, _text) => `mock-msg-${Date.now()}`),
   });
+  setLineGroupSummaryClient(null);
 });

@@ -53,7 +53,7 @@ import {
   SIMPLIFIED_PRIVATE_FALLBACK_HINT,
 } from '../services/privateFallbackHintService';
 import { handleConsultantMute } from '../services/consultantGroupControlService';
-import { isNannyPeriodPhrase } from '../services/consultantIntentClassifier';
+import { isNannyPeriodPhrase, isNannyPeriodApproximatePhrase, NANNY_PERIOD_STANDARD_SYNTAX_HINT } from '../services/consultantIntentClassifier';
 import { buildOfficialCsAnswer } from '../services/officialCsService';
 import {
   createIssueThread,
@@ -77,6 +77,7 @@ import {
   handleServiceReactivationRequest,
   isOutOfService,
 } from '../services/servicePeriodService';
+import { refreshGroupNameIfNeeded } from '../services/lineGroupSummaryService';
 import {
   getClarifyRound,
   incrementClarifyRound,
@@ -509,6 +510,7 @@ export async function processMessage(message: IncomingMessage): Promise<ProcessR
   }
 
   const groupId = message.groupId!;
+  await refreshGroupNameIfNeeded(groupId);
   await settleGroupTimeouts(groupId);
 
   const text = message.text.trim();
@@ -534,6 +536,10 @@ export async function processMessage(message: IncomingMessage): Promise<ProcessR
     }
     if (isNannyPeriodPhrase(text)) {
       replies.push(...(await handleServiceIntroduction(groupId, message.userId)));
+      return { replies, events: await getEventLogs() };
+    }
+    if (isNannyPeriodApproximatePhrase(text)) {
+      replies.push({ type: 'group', text: NANNY_PERIOD_STANDARD_SYNTAX_HINT });
       return { replies, events: await getEventLogs() };
     }
     if (text === '重新啟用教學協助期') {
@@ -584,6 +590,10 @@ export async function processMessage(message: IncomingMessage): Promise<ProcessR
     }
   } else if (isClosingSignal(text)) {
     return { replies: [], events: await getEventLogs() };
+  }
+
+  if (isNannyPeriodApproximatePhrase(text)) {
+    return { replies, events: await getEventLogs() };
   }
 
   if (!isConsultant) {

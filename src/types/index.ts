@@ -69,6 +69,7 @@ export interface EventLogEntry {
 
 export interface GroupFlags {
   groupId: string;
+  groupName: string | null;
   waitingFlag: boolean;
   waitingFlagSetAt: string | null;
   mute: boolean;

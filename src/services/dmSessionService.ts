@@ -13,9 +13,24 @@ import {
   hasMinimumDraftInput,
   INSUFFICIENT_DRAFT_INPUT_MESSAGE,
 } from './knowledgeCardDraftService';
+import { formatValidationErrorsForHuman } from './knowledgeCardValidationMessages';
 import { enforceKnowledgeCardRules } from './knowledgeCardValidator';
 import { isActiveConsultantOrAdmin } from './consultantWhitelist';
 import { resetPrivateFallbackForUser } from './privateFallbackHintService';
+import {
+  handleConsultantConfirmSubmit,
+  handleConsultantConfirmUpdateAttempt,
+  isConfirmSubmitPhrase,
+  matchesConfirmUpdateCommand,
+} from './knowledgeCardWriteService';
+import {
+  handleViewPendingHandoffs,
+  isViewPendingHandoffsPhrase,
+} from './pendingHandoffService';
+import {
+  buildVisionSummaryMessage,
+  isVisionConfirmPhrase,
+} from './screenshotVisionSummaryService';
 import type { MemoryDmSessionRepository } from '../repositories/memoryDmSessionRepository';
 
 export interface DmSessionMessageContext {
@@ -314,17 +329,14 @@ async function handleRegenerate(ctx: DmSessionMessageContext): Promise<BotReply[
   }
   const card = session.draftData.card;
   const humanReadable = formatHumanReadableKnowledgeCard(card);
-  const draftText = ['【知識卡草稿】', '※ 草稿不會自動生效。', '', '【草稿內容】', humanReadable].join(
-    '\n'
-  );
   const draftData: DmSessionDraftData = {
     ...session.draftData,
     humanReadableDraft: humanReadable,
-    draftText,
+    draftText: humanReadable,
   };
   await getRepos().dmSessions.updateDraftData(session.sessionId, draftData, nowIso());
   resetPrivateFallbackForUser(ctx.userId);
-  return pushReply(ctx.userId, draftText);
+  return pushReply(ctx.userId, humanReadable);
 }
 
 async function handleExportJson(ctx: DmSessionMessageContext): Promise<BotReply[]> {
@@ -334,11 +346,10 @@ async function handleExportJson(ctx: DmSessionMessageContext): Promise<BotReply[
   }
   const validation = enforceKnowledgeCardRules(session.draftData.card);
   if (!validation.valid || !validation.normalized) {
-    const lines = ['【驗證失敗】無法轉成 JSON：'];
-    for (const err of validation.errors) {
-      lines.push(`- ${err.field}: ${err.message}`);
-    }
-    return pushReply(ctx.userId, lines.join('\n'));
+    return pushReply(
+      ctx.userId,
+      ['【驗證失敗】無法轉成 JSON：', formatValidationErrorsForHuman(validation.errors)].join('\n')
+    );
   }
   await getRepos().dmSessions.updateDraftData(
     session.sessionId,
@@ -372,12 +383,76 @@ async function handleCancel(ctx: DmSessionMessageContext): Promise<BotReply[]> {
   return pushReply(ctx.userId, '已取消目前知識卡整理流程，草稿資料已保留。');
 }
 
+async function handleVisionConfirm(ctx: DmSessionMessageContext): Promise<BotReply[]> {
+  const session = await getActiveSession(ctx.userId);
+  if (!session?.draftData?.pendingVisionSummary) {
+    return pushReply(ctx.userId, '目前沒有待確認的截圖理解摘要。');
+  }
+
+  const mergedContent = session.draftData.inputNotes?.trim() ?? session.draftData.pendingVisionSummary;
+  const operation = session.draftData.card ? 'supplement' : 'create';
+  const draftData: DmSessionDraftData = {
+    ...session.draftData,
+    pendingVisionSummary: undefined,
+  };
+  await getRepos().dmSessions.updateDraftData(session.sessionId, draftData, nowIso());
+  return integrateDraftContent(ctx.userId, session, mergedContent, operation, mergedContent);
+}
+
+async function handleVisionSummaryAdjust(ctx: DmSessionMessageContext): Promise<BotReply[]> {
+  const session = await getActiveSession(ctx.userId);
+  if (!session?.draftData?.pendingVisionSummary) {
+    return pushReply(ctx.userId, '目前沒有待確認的截圖理解摘要。');
+  }
+
+  const payload = ctx.text.replace(SUPPLEMENT_PATTERN, '').replace(MODIFY_PATTERN, '').trim();
+  if (!payload) {
+    return pushReply(ctx.userId, '請在「補充：」或「修改：」後提供內容。');
+  }
+
+  const baseVision = session.draftData.pendingVisionSummary;
+  const adjustedVision = `${baseVision}\n\n[使用者調整]\n${payload}`;
+  const summaryMessage = buildVisionSummaryMessage(adjustedVision);
+  const draftData: DmSessionDraftData = {
+    ...session.draftData,
+    pendingVisionSummary: adjustedVision,
+    inputNotes: mergeVisionTextWithSessionNotes(session, adjustedVision),
+    draftText: summaryMessage,
+    humanReadableDraft: summaryMessage,
+  };
+  await getRepos().dmSessions.updateDraftData(session.sessionId, draftData, nowIso());
+  return pushReply(ctx.userId, summaryMessage);
+}
+
+function sessionHasDraftContext(session: DmSessionRecord): boolean {
+  return Boolean(
+    session.draftData?.card ||
+      session.draftData?.inputNotes?.trim() ||
+      session.draftData?.pendingVisionSummary?.trim()
+  );
+}
+
 async function handleGeneralContent(ctx: DmSessionMessageContext): Promise<BotReply[]> {
   const session = await getActiveSession(ctx.userId);
   if (!session) {
     return [];
   }
-  return processContentIntoDraft(ctx.userId, session, ctx.text.trim(), 'create');
+
+  if (session.draftData?.pendingVisionSummary) {
+    return pushReply(
+      ctx.userId,
+      '截圖理解摘要尚未確認。請回覆「對，幫我整理成知識卡」，或使用「補充：…」「修改：…」「取消」。'
+    );
+  }
+
+  const content = ctx.text.trim();
+  const hasContext = sessionHasDraftContext(session);
+  if (!hasContext && !hasMinimumDraftInput(content)) {
+    return pushReply(ctx.userId, INSUFFICIENT_DRAFT_INPUT_MESSAGE);
+  }
+
+  const operation = session.draftData?.card ? 'supplement' : 'create';
+  return processContentIntoDraft(ctx.userId, session, content, operation);
 }
 
 export async function storeSessionDraftFromRevision(
@@ -445,6 +520,33 @@ export async function handleDmSessionPrivateMessage(
 
   if (isCancelPhrase(trimmed)) {
     return handleCancel(ctx);
+  }
+
+  if (isConfirmSubmitPhrase(trimmed)) {
+    return handleConsultantConfirmSubmit(ctx.userId);
+  }
+
+  if (matchesConfirmUpdateCommand(trimmed)) {
+    return handleConsultantConfirmUpdateAttempt({
+      userId: ctx.userId,
+      text: trimmed,
+      quotedMessageId: ctx.quotedMessageId,
+    });
+  }
+
+  if (isViewPendingHandoffsPhrase(trimmed)) {
+    return handleViewPendingHandoffs(ctx.userId);
+  }
+
+  if (isVisionConfirmPhrase(trimmed)) {
+    return handleVisionConfirm(ctx);
+  }
+
+  if (SUPPLEMENT_PATTERN.test(trimmed) || MODIFY_PATTERN.test(trimmed)) {
+    const activeSession = await getActiveSession(ctx.userId);
+    if (activeSession?.draftData?.pendingVisionSummary) {
+      return handleVisionSummaryAdjust(ctx);
+    }
   }
 
   if (SUPPLEMENT_PATTERN.test(trimmed)) {

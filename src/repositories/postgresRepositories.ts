@@ -43,6 +43,7 @@ const VALID_RISK_LEVELS = new Set(Object.values(RiskLevel));
 function defaultGroupFlags(groupId: string): GroupFlags {
   return {
     groupId,
+    groupName: null,
     waitingFlag: false,
     waitingFlagSetAt: null,
     mute: false,
@@ -74,18 +75,20 @@ function createGroupRepository(pool: Pool): GroupRepository {
       const next = { ...current, ...patch };
       await pool.query(
         `UPDATE group_flags SET
-          waiting_flag = $2,
-          waiting_flag_set_at = $3,
-          mute = $4,
-          mute_until = $5,
-          service_start_at = $6,
-          service_end_at = $7,
-          active_issue_thread_id = $8,
-          service_reactivation_pending = $9,
+          group_name = $2,
+          waiting_flag = $3,
+          waiting_flag_set_at = $4,
+          mute = $5,
+          mute_until = $6,
+          service_start_at = $7,
+          service_end_at = $8,
+          active_issue_thread_id = $9,
+          service_reactivation_pending = $10,
           updated_at = NOW()
         WHERE group_id = $1`,
         [
           groupId,
+          next.groupName,
           next.waitingFlag,
           next.waitingFlagSetAt,
           next.mute,

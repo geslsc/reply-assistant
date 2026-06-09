@@ -145,7 +145,9 @@ active admin / consultant 可在私訊直接貼截圖整理知識卡草稿：
 4. vision 失敗時回覆「截圖理解失敗，請改用文字描述」，session 維持 active。
 5. 缺 `OPENAI_API_KEY` 時回覆「AI 功能尚未啟用」，文字流程仍正常。
 
-**2-C-1 不新增 DB 表，無需 db:migrate。**
+**注意：** 2-C-1 本身不新增獨立圖片資料表，但 2026-06-09 UX 修正已在
+`group_flags` 增加 `group_name` 欄位，用於快取 LINE 群組名稱。部署這版前仍需執行
+`npm run db:migrate`。
 
 Vision model 由 `OPENAI_VISION_MODEL` 設定（預設 `gpt-4o`）。
 

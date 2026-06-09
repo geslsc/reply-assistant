@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
+import { BotReply } from '../types';
 import { getRepos } from '../repositories';
 import {
   CreatePendingHandoffParams,
@@ -6,6 +7,7 @@ import {
   PendingHandoffInvalidReason,
   PendingHandoffStatus,
 } from '../repositories/pendingHandoffTypes';
+import { getGroupDisplayName } from './lineGroupSummaryService';
 
 export async function createPendingHandoff(
   params: CreatePendingHandoffParams
@@ -59,6 +61,48 @@ export function formatGroupLabelForHandoff(groupId: string, groupName?: string |
     return groupName;
   }
   return `尚未取得群組名稱（groupId: ${groupId}）`;
+}
+
+export function buildHandoffShortReminder(params: {
+  groupId: string;
+  groupName?: string | null;
+  shortCode: string;
+}): string {
+  const groupLabel = formatGroupLabelForHandoff(params.groupId, params.groupName ?? null);
+  return [
+    '【群組新問題提醒】',
+    '您目前正在整理知識卡，我先幫您記下新的群組問題。',
+    '',
+    `群組：${groupLabel}`,
+    `問題短碼：${params.shortCode}`,
+    '',
+    '完成目前整理後，可輸入「查看待處理問題」查看完整內容。',
+  ].join('\n');
+}
+
+export function isViewPendingHandoffsPhrase(text: string): boolean {
+  return text.trim() === '查看待處理問題';
+}
+
+export async function handleViewPendingHandoffs(userId: string): Promise<BotReply[]> {
+  const handoffs = await getOpenPendingHandoffs(userId);
+  if (handoffs.length === 0) {
+    return [{ type: 'push', userId, text: '目前沒有待處理問題。' }];
+  }
+
+  const lines: string[] = ['【待處理問題清單】', ''];
+  for (const handoff of handoffs) {
+    const groupName = await getGroupDisplayName(handoff.groupId);
+    const groupLabel = formatGroupLabelForHandoff(handoff.groupId, groupName);
+    lines.push(
+      `群組：${groupLabel}`,
+      `問題短碼：${handoff.shortCode}`,
+      `問題摘要：${handoff.customerQuestion ?? '（無摘要）'}`,
+      ''
+    );
+  }
+  lines.push('可使用短碼代回，或回覆「這題 [您的回覆內容]」。');
+  return [{ type: 'push', userId, text: lines.join('\n') }];
 }
 
 export function buildHandoffPrivateCard(params: {

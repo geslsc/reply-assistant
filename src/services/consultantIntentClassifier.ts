@@ -184,3 +184,24 @@ export function isNannyPeriodPhrase(text: string): boolean {
     trimmed as (typeof NANNY_PERIOD_STANDARD_PHRASES)[number]
   );
 }
+
+const NANNY_PERIOD_APPROXIMATE_PATTERNS: RegExp[] = [
+  /^啟用保母期$/u,
+  /^開始保母期$/u,
+  /^保母期$/u,
+  /^啟用\s*30\s*天$/u,
+  /^開始協助$/u,
+];
+
+export const NANNY_PERIOD_STANDARD_SYNTAX_HINT = `保母期啟用請使用標準語法：
+「小助手啟用保母期 30 天」
+或
+「小助手開始協助 30 天」`;
+
+export function isNannyPeriodApproximatePhrase(text: string): boolean {
+  const trimmed = text.trim();
+  if (isNannyPeriodPhrase(trimmed)) {
+    return false;
+  }
+  return NANNY_PERIOD_APPROXIMATE_PATTERNS.some((pattern) => pattern.test(trimmed));
+}

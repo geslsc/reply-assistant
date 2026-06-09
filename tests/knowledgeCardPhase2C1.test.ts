@@ -7,6 +7,7 @@ import {
   handlePrivateImageMessage,
   IMAGE_ORGANIZE_FIRST_MESSAGE,
   VISION_FAILED_MESSAGE,
+  VISION_UNCLEAR_MESSAGE,
   AI_NOT_ENABLED_MESSAGE,
 } from '../src/services/dmSessionImageService';
 import {
@@ -82,28 +83,29 @@ describe('Knowledge card Phase 2-C-1 private screenshot flow', () => {
     setLlmClient(null);
   });
 
-  it('1. admin with active session + image updates draft_data', async () => {
+  it('1. admin with active session + image returns vision summary first', async () => {
     setupImageMocks({ visionText: visionProblemSolutionText });
     await seedActiveSessionForTest({ userId: TEST_ADMIN, card: sampleCard });
     const replies = await handlePrivateImageMessage({
       userId: TEST_ADMIN,
       messageId: 'img-admin-001',
     });
-    expect(replies[0].text).toMatch(/【草稿內容】/);
+    expect(replies[0].text).toMatch(/【截圖理解摘要】/);
     const session = await getRepos().dmSessions.findActiveByUserId(TEST_ADMIN);
     expect(session?.draftData?.inputNotes).toMatch(/截圖理解/);
+    expect(session?.draftData?.pendingVisionSummary).toBeDefined();
     expect(session?.draftData?.card?.card_id).toBe('phase2c1-card');
   });
 
-  it('2. consultant with active session + image updates draft_data', async () => {
+  it('2. consultant with active session + image returns vision summary first', async () => {
     setupImageMocks({ visionText: visionProblemSolutionText });
     await seedActiveSessionForTest({ userId: TEST_CONSULTANT, card: sampleCard });
     const replies = await handlePrivateImageMessage({
       userId: TEST_CONSULTANT,
       messageId: 'img-consultant-001',
     });
-    expect(replies[0].text).toMatch(/【草稿內容】/);
-    expect((await getRepos().dmSessions.findActiveByUserId(TEST_CONSULTANT))?.draftData?.inputNotes).toBeDefined();
+    expect(replies[0].text).toMatch(/【截圖理解摘要】/);
+    expect((await getRepos().dmSessions.findActiveByUserId(TEST_CONSULTANT))?.draftData?.pendingVisionSummary).toBeDefined();
   });
 
   it('3. no active session + image only prompts organize first', async () => {
@@ -118,15 +120,29 @@ describe('Knowledge card Phase 2-C-1 private screenshot flow', () => {
     expect(await getRepos().dmSessions.findActiveByUserId(TEST_CONSULTANT)).toBeNull();
   });
 
-  it('4. no active session + organize trigger + image creates session and draft', async () => {
+  it('4. no active session + organize trigger + image creates session with vision summary', async () => {
     setupImageMocks({ visionText: visionProblemSolutionText });
     const replies = await handlePrivateImageMessage({
       userId: TEST_CONSULTANT,
       messageId: 'img-organize-001',
       accompanyingText: '幫我整理知識卡',
     });
-    expect(replies[0].text).toMatch(/【草稿內容】/);
+    expect(replies[0].text).toMatch(/【截圖理解摘要】/);
     expect(await getRepos().dmSessions.findActiveByUserId(TEST_CONSULTANT)).not.toBeNull();
+  });
+
+  it('4b. confirming vision summary produces human readable draft', async () => {
+    setupImageMocks({ visionText: visionProblemSolutionText });
+    await seedActiveSessionForTest({ userId: TEST_CONSULTANT, card: sampleCard });
+    await handlePrivateImageMessage({ userId: TEST_CONSULTANT, messageId: 'img-confirm-001' });
+    const draftReplies = await handleDmSessionPrivateMessage({
+      userId: TEST_CONSULTANT,
+      text: '對，幫我整理成知識卡',
+    });
+    expect(draftReplies?.[0].text).toMatch(/【知識卡草稿】/);
+    expect(
+      (await getRepos().dmSessions.findActiveByUserId(TEST_CONSULTANT))?.draftData?.pendingVisionSummary
+    ).toBeUndefined();
   });
 
   it('5. vision failure keeps session active and allows text continue', async () => {
@@ -154,7 +170,7 @@ describe('Knowledge card Phase 2-C-1 private screenshot flow', () => {
       userId: TEST_CONSULTANT,
       text: '補充：請加上後台登入步驟',
     });
-    expect(textReplies?.[0].text).toMatch(/【草稿內容】/);
+    expect(textReplies?.[0].text).toMatch(/【知識卡草稿】/);
   });
 
   it('6. missing OPENAI_API_KEY replies AI not enabled and text flow works', async () => {
@@ -174,7 +190,7 @@ describe('Knowledge card Phase 2-C-1 private screenshot flow', () => {
       userId: TEST_CONSULTANT,
       text: '重新整理',
     });
-    expect(textReplies?.[0].text).toMatch(/【草稿內容】/);
+    expect(textReplies?.[0].text).toMatch(/【知識卡草稿】/);
   });
 
   it('7. image buffer is not retained after vision completes', async () => {
@@ -223,7 +239,7 @@ describe('Knowledge card Phase 2-C-1 private screenshot flow', () => {
       userId: TEST_CONSULTANT,
       messageId: 'img-unclear-001',
     });
-    expect(replies[0].text).toMatch(/內容還不夠明確/);
+    expect(replies[0].text).toBe(VISION_UNCLEAR_MESSAGE);
     expect((await getRepos().dmSessions.findActiveByUserId(TEST_CONSULTANT))?.draftData?.card?.card_id).toBe(
       'phase2c1-card'
     );
@@ -246,10 +262,14 @@ describe('Knowledge card Phase 2-C-1 private screenshot flow', () => {
     expect(notes.length).toBeGreaterThan(20);
   });
 
-  it('12. consultant confirm submit still uses transaction', async () => {
+  it('12. consultant confirm submit still uses transaction after vision confirm', async () => {
     setupImageMocks({ visionText: visionProblemSolutionText });
     await seedActiveSessionForTest({ userId: TEST_CONSULTANT, card: sampleCard });
     await handlePrivateImageMessage({ userId: TEST_CONSULTANT, messageId: 'img-submit-001' });
+    await handleDmSessionPrivateMessage({
+      userId: TEST_CONSULTANT,
+      text: '對，幫我整理成知識卡',
+    });
     const sessionBefore = await getRepos().dmSessions.findActiveByUserId(TEST_CONSULTANT);
     await handleConsultantConfirmSubmit(TEST_CONSULTANT);
     const submitted = await getRepos().dmSessions.findById(sessionBefore!.sessionId);
@@ -257,10 +277,14 @@ describe('Knowledge card Phase 2-C-1 private screenshot flow', () => {
     expect(await getRepos().pendingKnowledgeReviews.listPending()).toHaveLength(1);
   });
 
-  it('13. admin confirm update validates and writes knowledge_cards', async () => {
+  it('13. admin confirm update validates and writes knowledge_cards after vision confirm', async () => {
     setupImageMocks({ visionText: visionProblemSolutionText });
     await seedActiveSessionForTest({ userId: TEST_ADMIN, card: sampleCard });
     await handlePrivateImageMessage({ userId: TEST_ADMIN, messageId: 'img-admin-update-001' });
+    await handleDmSessionPrivateMessage({
+      userId: TEST_ADMIN,
+      text: '對，幫我整理成知識卡',
+    });
     const replies = await handleConfirmUpdate({ userId: TEST_ADMIN, text: '確認更新' });
     expect(replies[0].text).toMatch(/已確認更新/);
     expect(await getRepos().knowledgeCards.findById('phase2c1-card')).not.toBeNull();

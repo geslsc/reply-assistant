@@ -122,7 +122,7 @@ describe('Knowledge card Phase 2-B dm_sessions flow', () => {
       userId: TEST_CONSULTANT,
       text: '補充：請加上後台登入步驟',
     });
-    expect(replies?.[0].text).toMatch(/【草稿內容】/);
+    expect(replies?.[0].text).toMatch(/【知識卡草稿】/);
     expect((await getUserDraft(TEST_CONSULTANT))?.card.title).toContain('補充版');
   });
 
@@ -134,7 +134,7 @@ describe('Knowledge card Phase 2-B dm_sessions flow', () => {
       text: '修改：標題改成修改後標題',
     });
     expect((await getUserDraft(TEST_CONSULTANT))?.card.title).toBe('修改後標題');
-    expect(replies?.[0].text).toMatch(/【草稿內容】/);
+    expect(replies?.[0].text).toMatch(/【知識卡草稿】/);
   });
 
   it('7. 重新整理 regenerates human readable draft from draft_data', async () => {
@@ -143,7 +143,7 @@ describe('Knowledge card Phase 2-B dm_sessions flow', () => {
       userId: TEST_CONSULTANT,
       text: '重新整理',
     });
-    expect(replies?.[0].text).toMatch(/【草稿內容】/);
+    expect(replies?.[0].text).toMatch(/【知識卡草稿】/);
     expect(replies?.[0].text).toMatch(/登入問題/);
   });
 

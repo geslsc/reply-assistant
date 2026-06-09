@@ -178,7 +178,9 @@ function buildOwnDraftConfirmValidationFailureMessage(params: {
 }): string {
   return [
     `知識卡「${params.cardId}」驗證失敗，尚未寫入知識庫。`,
-    `原因：${params.error}`,
+    '',
+    params.error,
+    '',
     '草稿已保留，可輸入「修改：…」調整後再輸入「確認更新」。',
   ].join('\n');
 }

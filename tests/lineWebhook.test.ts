@@ -170,7 +170,7 @@ describe('LINE Webhook Tests', () => {
       .send(body)
       .expect(200);
 
-    await expect(pushed).resolves.toContain('【草稿內容】');
+    await expect(pushed).resolves.toContain('【知識卡草稿】');
   });
 
   it('routes private image event to handlePrivateImageMessage in background', async () => {
@@ -244,7 +244,7 @@ describe('LINE Webhook Tests', () => {
       .expect(200);
 
     expect(handlerSpy).not.toHaveBeenCalled();
-    expect(repliedText).toMatch(/請用文字描述問題/);
+    expect(repliedText).toBe('');
     handlerSpy.mockRestore();
   });
 });

@@ -109,7 +109,7 @@ describe('Draft input gate remediation', () => {
       userId: TEST_CONSULTANT,
       text: '整理知識卡：店家遇到登入不了',
     });
-    expect(replies?.[0].text).toMatch(/【草稿內容】/);
+    expect(replies?.[0].text).toMatch(/【知識卡草稿】/);
     expect(complete).toHaveBeenCalled();
   });
 
@@ -121,7 +121,7 @@ describe('Draft input gate remediation', () => {
       userId: TEST_CONSULTANT,
       text: '整理知識卡：建議先請店家重新登入並確認帳號權限',
     });
-    expect(replies?.[0].text).toMatch(/【草稿內容】/);
+    expect(replies?.[0].text).toMatch(/【知識卡草稿】/);
     expect(complete).toHaveBeenCalled();
   });
 
@@ -132,7 +132,7 @@ describe('Draft input gate remediation', () => {
       userId: TEST_CONSULTANT,
       text: '整理知識卡：店家問登入不了，建議先確認帳號權限',
     });
-    expect(replies?.[0].text).toMatch(/【草稿內容】/);
+    expect(replies?.[0].text).toMatch(/【知識卡草稿】/);
     expect(complete).toHaveBeenCalled();
   });
 
@@ -173,7 +173,7 @@ describe('Phase 2-A remediation acceptance tests', () => {
       userId: TEST_CONSULTANT,
       text: '補充：請加上後台登入步驟說明',
     });
-    expect(replies?.[0].text).toMatch(/【草稿內容】/);
+    expect(replies?.[0].text).toMatch(/【知識卡草稿】/);
     expect((await getUserDraft(TEST_CONSULTANT))?.card.title).toContain('補充版');
     expect(await getRepos().pendingKnowledgeReviews.listPending()).toHaveLength(0);
     expect(await getRepos().knowledgeCards.findById('remediation-card')).toBeNull();
@@ -186,7 +186,7 @@ describe('Phase 2-A remediation acceptance tests', () => {
       userId: TEST_CONSULTANT,
       text: '修改：標題改成修改後標題',
     });
-    expect(replies?.[0].text).toMatch(/【草稿內容】/);
+    expect(replies?.[0].text).toMatch(/【知識卡草稿】/);
     expect((await getUserDraft(TEST_CONSULTANT))?.card.title).toBe('修改後標題');
     expect(await getRepos().pendingKnowledgeReviews.listPending()).toHaveLength(0);
   });

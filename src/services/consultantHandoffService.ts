@@ -6,9 +6,12 @@ import { transitionState } from './stateMachine';
 import { getIssueThread, updateIssueThread } from './issueThreadService';
 import {
   buildHandoffPrivateCard,
+  buildHandoffShortReminder,
   registerHandoffsForConsultants,
 } from './pendingHandoffService';
 import { deriveShortCode } from './shortCodeService';
+import { getGroupDisplayName, refreshGroupNameIfNeeded } from './lineGroupSummaryService';
+import { getActiveSession } from './dmSessionService';
 
 export interface HandoffDraft {
   questionSummary: string;
@@ -111,24 +114,38 @@ export async function executeHandoff(params: {
     thread?.createdAt ?? new Date().toISOString()
   );
 
+  await refreshGroupNameIfNeeded(params.groupId);
+  const groupName = await getGroupDisplayName(params.groupId);
+
   await registerHandoffsForConsultants({
     groupId: params.groupId,
-    groupName: null,
+    groupName,
     issueThreadId: params.issueThreadId,
     shortCode,
     customerQuestion: params.customerQuestion,
     consultantIds: consultants.map((c) => c.userId),
   });
 
-  const replies: BotReply[] = consultants.map((c) => ({
-    type: 'push' as const,
-    userId: c.userId,
-    text: formatHandoffMessage(draft, {
-      groupId: params.groupId,
-      groupName: null,
-      shortCode,
-    }),
-  }));
+  const replies: BotReply[] = [];
+  for (const consultant of consultants) {
+    const activeSession = await getActiveSession(consultant.userId);
+    const text = activeSession
+      ? buildHandoffShortReminder({
+          groupId: params.groupId,
+          groupName,
+          shortCode,
+        })
+      : formatHandoffMessage(draft, {
+          groupId: params.groupId,
+          groupName,
+          shortCode,
+        });
+    replies.push({
+      type: 'push',
+      userId: consultant.userId,
+      text,
+    });
+  }
 
   return { replies, draft };
 }

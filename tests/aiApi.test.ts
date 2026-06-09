@@ -83,7 +83,7 @@ describe('AI API Conservative Integration', () => {
       text: '整理知識卡：店家遇到登入問題',
     });
     expect(complete).toHaveBeenCalled();
-    expect(replies?.[0].text).toContain('【草稿內容】');
+    expect(replies?.[0].text).toContain('【知識卡草稿】');
   });
 
   it('does not call LLM in group public answer flow', async () => {

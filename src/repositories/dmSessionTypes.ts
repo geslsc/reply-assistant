@@ -11,6 +11,8 @@ export interface DmSessionDraftData {
   humanReadableDraft: string;
   /** 累積的文字輸入（含 vision 摘要），不含圖片資料 */
   inputNotes?: string;
+  /** 等待使用者確認的截圖理解摘要，不含圖片資料 */
+  pendingVisionSummary?: string;
 }
 
 export interface DmSessionRecord {

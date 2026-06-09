@@ -2,7 +2,9 @@ import {
   KNOWLEDGE_CARD_LLM_SYSTEM_PROMPT,
   KnowledgeCard,
 } from '../schemas/knowledgeCardSchema';
-import { enforceKnowledgeCardRules, ValidationResult } from './knowledgeCardValidator';
+import { RiskLevel } from '../types';
+import { cardContainsSensitiveContent, enforceKnowledgeCardRules, ValidationResult } from './knowledgeCardValidator';
+import { formatValidationErrorsForHuman } from './knowledgeCardValidationMessages';
 
 export type KnowledgeDraftOperation =
   | 'create'
@@ -166,22 +168,62 @@ export async function generateKnowledgeCardDraft(params: {
 }
 
 /** 格式化草稿回覆文字；修改原因只寫在文字，不進 JSON */
-export function formatHumanReadableKnowledgeCard(card: KnowledgeCard): string {
+export function describeAutoPublicReply(card: KnowledgeCard): string {
+  if (card.can_public_reply) {
+    return '是';
+  }
+  const sensitive = cardContainsSensitiveContent(card);
+  if (sensitive.some((category) => category === '帳務' || category === '金流')) {
+    return '否，這張卡涉及儲值 / 金額 / 帳務相關情境，僅作為導入教練參考。';
+  }
+  if (card.risk_level !== RiskLevel.LOW) {
+    return '否，這張卡不會設定成小助手自動公開回答，僅作為導入教練參考。';
+  }
+  return '否，這張卡不會設定成小助手自動公開回答，僅作為導入教練參考。';
+}
+
+export function formatDraftActionHints(): string {
   return [
-    `標題：${card.title}`,
-    `card_id：${card.card_id}`,
-    `patterns：${card.patterns.join('、') || '（無）'}`,
-    `risk_level：${card.risk_level}`,
-    `can_public_reply：${card.can_public_reply ? '是' : '否'}`,
-    `standard_answer：${card.standard_answer}`,
-    card.not_applicable.length > 0 ? `not_applicable：${card.not_applicable.join('、')}` : '',
-    card.escalate_to_consultant.length > 0
-      ? `escalate_to_consultant：${card.escalate_to_consultant.join('、')}`
-      : '',
-    `status：${card.status}`,
-  ]
-    .filter(Boolean)
-    .join('\n');
+    '您可以回覆：',
+    '- 補充：...',
+    '- 修改：...',
+    '- 轉成 JSON',
+    '- 確認送出',
+    '- 確認更新',
+    '- 取消',
+  ].join('\n');
+}
+
+export function formatHumanReadableKnowledgeCard(card: KnowledgeCard): string {
+  const lines: string[] = [
+    '【知識卡草稿】',
+    '※ 草稿不會自動生效。',
+    '',
+    '主題：',
+    card.title,
+    '',
+    '店家可能會這樣問：',
+    ...card.patterns.map((pattern) => `- ${pattern}`),
+    '',
+    '建議回覆方向：',
+    card.standard_answer,
+  ];
+
+  if (card.not_applicable.length > 0) {
+    lines.push('', '不適用情況：', ...card.not_applicable.map((item) => `- ${item}`));
+  }
+
+  if (card.escalate_to_consultant.length > 0) {
+    lines.push(
+      '',
+      '需要導入教練協助的情況：',
+      ...card.escalate_to_consultant.map((item) => `- ${item}`)
+    );
+  }
+
+  lines.push('', '小助手是否會自動公開回答：', describeAutoPublicReply(card));
+  lines.push('', formatDraftActionHints());
+  return lines.join('\n');
 }
 
 export function formatDraftJson(card: KnowledgeCard): string {
@@ -274,36 +316,18 @@ export function formatDraftReply(result: KnowledgeDraftResult): string {
     return result.text;
   }
 
-  const lines: string[] = [
-    '【知識卡草稿】',
-    '※ 草稿不會自動生效。',
-    '顧問請回覆「確認送出」送 admin 審核；admin 自己整理可直接回覆「確認更新」。',
-  ];
+  const lines: string[] = [];
 
   if (result.reasonText) {
-    lines.push('', `【修改原因】${result.reasonText}`);
+    lines.push(`【修改原因】${result.reasonText}`, '');
   }
 
   if (!result.validation.valid || !result.validation.normalized) {
-    lines.push('', '【驗證失敗】');
-    const llmDisabled = result.validation.errors.some((e) => e.field === '_llm');
-    const inputInsufficient = result.validation.errors.some((e) => e.field === '_input');
-    if (llmDisabled) {
-      lines.push('AI 草稿整理尚未啟用');
-    }
-    if (inputInsufficient) {
-      lines.push(INSUFFICIENT_DRAFT_INPUT_MESSAGE);
-    }
-    for (const err of result.validation.errors) {
-      if (err.field === '_input') {
-        continue;
-      }
-      lines.push(`- ${err.field}: ${err.message}`);
-    }
+    lines.push('【驗證失敗】', formatValidationErrorsForHuman(result.validation.errors));
     return lines.join('\n');
   }
 
-  lines.push('', '【草稿內容】', formatHumanReadableKnowledgeCard(result.validation.normalized));
+  lines.push(formatHumanReadableKnowledgeCard(result.validation.normalized));
   return lines.join('\n');
 }
 

@@ -4,6 +4,7 @@ import { getRepos } from '../repositories';
 function defaultFlags(groupId: string): GroupFlags {
   return {
     groupId,
+    groupName: null,
     waitingFlag: false,
     waitingFlagSetAt: null,
     mute: false,

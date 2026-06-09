@@ -46,7 +46,7 @@ git push -u origin main
 | `OPENAI_API_KEY` | **選填**。僅顧問私訊 AI 草稿／摘要；未設定不影響啟動 |
 | `KNOWLEDGE_EXPORT_REMINDER_DAYS` | admin 被動備份提醒天數，預設 `7` |
 
-**注意：** `npm run db:migrate` 只讀 `DATABASE_URL`，不讀 `TEST_DATABASE_URL`。部署 schema 更新（含 `knowledge_cards`、`pending_handoffs`）後務必執行 migration。
+**注意：** `npm run db:migrate` 只讀 `DATABASE_URL`，不讀 `TEST_DATABASE_URL`。部署 schema 更新（含 `knowledge_cards`、`pending_handoffs`、`dm_sessions`、`group_flags.group_name`）後務必執行 migration。
 
 ### 4. 執行 Migration
 

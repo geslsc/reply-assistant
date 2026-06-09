@@ -12,6 +12,7 @@ import { KnowledgeOverride } from './interfaces';
 export function mapGroupRow(row: Record<string, unknown>): GroupFlags {
   return {
     groupId: String(row.group_id),
+    groupName: row.group_name ? String(row.group_name) : null,
     waitingFlag: Boolean(row.waiting_flag),
     waitingFlagSetAt: row.waiting_flag_set_at
       ? new Date(String(row.waiting_flag_set_at)).toISOString()

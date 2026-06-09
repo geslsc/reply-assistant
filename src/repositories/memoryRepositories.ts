@@ -34,6 +34,7 @@ const VALID_RISK_LEVELS = new Set(Object.values(RiskLevel));
 function defaultGroupFlags(groupId: string): GroupFlags {
   return {
     groupId,
+    groupName: null,
     waitingFlag: false,
     waitingFlagSetAt: null,
     mute: false,
