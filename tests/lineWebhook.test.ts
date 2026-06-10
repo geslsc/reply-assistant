@@ -142,7 +142,7 @@ describe('LINE Webhook Tests', () => {
       .expect(200);
   });
 
-  it('handles private AI draft in background and pushes the result', async () => {
+  it('handles private AI draft with replyMessage to avoid push rate limits', async () => {
     await registerAdmin(TEST_ADMIN);
     setLlmClient({
       async complete() {
@@ -160,17 +160,9 @@ describe('LINE Webhook Tests', () => {
       },
     });
 
-    const pushed = new Promise<string>((resolve) => {
-      setLineMessageClient({
-        async replyText() {
-          throw new Error('private AI draft should not use replyMessage');
-        },
-        async pushText(_userId, text) {
-          resolve(text);
-          return 'mock-push-id';
-        },
-      });
-    });
+    const replyText = jest.fn().mockResolvedValue(undefined);
+    const pushText = jest.fn().mockResolvedValue('mock-push-id');
+    setLineMessageClient({ replyText, pushText });
 
     const body = buildWebhookBody([
       {
@@ -188,7 +180,40 @@ describe('LINE Webhook Tests', () => {
       .send(body)
       .expect(200);
 
-    await expect(pushed).resolves.toContain('【知識卡草稿｜');
+    expect(replyText).toHaveBeenCalledWith(
+      'reply-token-private-ai',
+      expect.stringContaining('【知識卡草稿｜')
+    );
+    expect(pushText).not.toHaveBeenCalled();
+  });
+
+  it('handles bare organize command with replyMessage to avoid push rate limits', async () => {
+    await registerAdmin(TEST_ADMIN);
+    const replyText = jest.fn().mockResolvedValue(undefined);
+    const pushText = jest.fn().mockResolvedValue('mock-push-id');
+    setLineMessageClient({ replyText, pushText });
+
+    const body = buildWebhookBody([
+      {
+        type: 'message',
+        source: { type: 'user', userId: TEST_ADMIN },
+        message: { type: 'text', text: '幫我整理知識卡' },
+        replyToken: 'reply-token-organize-start',
+      },
+    ]);
+
+    await request(app)
+      .post('/webhook/line')
+      .set('Content-Type', 'application/json')
+      .set('x-line-signature', sign(body))
+      .send(body)
+      .expect(200);
+
+    expect(replyText).toHaveBeenCalledWith(
+      'reply-token-organize-start',
+      expect.stringContaining('請用下面格式提供內容')
+    );
+    expect(pushText).not.toHaveBeenCalled();
   });
 
   it('routes private image event to handlePrivateImageMessage in background', async () => {

@@ -7,10 +7,6 @@ import { deliverBotReplies } from '../services/lineMessageService';
 import { handleBotLeaveGroup } from '../services/botLeaveGroupService';
 import { handleBotJoinGroup } from '../services/botJoinGroupService';
 import { handlePrivateImageMessage } from '../services/dmSessionImageService';
-import {
-  classifyConsultantIntent,
-  isConsultantPrivateAiIntent,
-} from '../services/consultantIntentClassifier';
 import { getRepos } from '../repositories';
 
 interface LineWebhookEvent {
@@ -154,11 +150,7 @@ async function claimLineWebhookEvent(event: LineWebhookEvent): Promise<boolean> 
 }
 
 function shouldHandleInBackground(message: IncomingMessage): boolean {
-  if (message.isGroup) {
-    return false;
-  }
-  const { intent } = classifyConsultantIntent(message.text);
-  return isConsultantPrivateAiIntent(intent);
+  return false;
 }
 
 function shouldHandleImageInBackground(message: IncomingImageMessage): boolean {
