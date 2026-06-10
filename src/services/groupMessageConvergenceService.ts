@@ -79,6 +79,18 @@ async function markBufferResolved(bufferId: string): Promise<void> {
   await getRepos().groupMessageBuffers.updateStatus(bufferId, 'resolved');
 }
 
+export async function resolveCollectingBuffersForThread(
+  groupId: string,
+  issueThreadId: string
+): Promise<void> {
+  const buffers = await getRepos().groupMessageBuffers.findCollectingByGroup(groupId);
+  for (const buffer of buffers) {
+    if (buffer.issueThreadId === issueThreadId) {
+      await markBufferResolved(buffer.bufferId);
+    }
+  }
+}
+
 async function processBuffer(
   buffer: GroupMessageBuffer,
   options?: { useAsyncDelivery?: boolean }

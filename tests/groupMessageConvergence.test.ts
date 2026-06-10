@@ -344,6 +344,15 @@ describe('Group message convergence and semantic routing', () => {
     await processMessage(groupMsg(TEST_CONSULTANT, 'OK'));
 
     expect(await getActiveIssueThread(TEST_GROUP)).toBeUndefined();
+
+    const next = await processMessage(groupMsg(TEST_CUSTOMER, '怎麼登入後台'));
+    const nextBuffer = await getRepos().groupMessageBuffers.findCollectingByGroupAndCustomer(
+      TEST_GROUP,
+      TEST_CUSTOMER
+    );
+    expect(next.replies).toHaveLength(0);
+    expect(nextBuffer).not.toBeNull();
+    expect(nextBuffer!.messages[0].text).toBe('怎麼登入後台');
   });
 
   it('resumes assistant after consultant takeover when consultant says 小助手再麻煩了', async () => {
@@ -356,6 +365,23 @@ describe('Group message convergence and semantic routing', () => {
     expect((await getActiveIssueThread(TEST_GROUP))?.consultantAnswered).toBe(true);
 
     await processMessage(groupMsg(TEST_CONSULTANT, '小助手再麻煩了'));
+    expect(await getActiveIssueThread(TEST_GROUP)).toBeUndefined();
+
+    const next = await processMessage(groupMsg(TEST_CUSTOMER, '怎麼登入後台'));
+    expect(next.replies.find((r) => r.type === 'group')?.text).toContain('登入');
+  });
+
+  it('resumes assistant after consultant takeover when consultant asks for self introduction', async () => {
+    resetEnvCache();
+    loadEnv({ USE_MEMORY_REPOS: true, DEBOUNCE_SECONDS: 0 });
+    clearConvergenceTimersForTest();
+
+    await processMessage(groupMsg(TEST_CUSTOMER, '怎麼使用計次券'));
+    await processMessage(groupMsg(TEST_CONSULTANT, '請到票券管理新增計次券'));
+    expect((await getActiveIssueThread(TEST_GROUP))?.consultantAnswered).toBe(true);
+
+    const intro = await processMessage(groupMsg(TEST_CONSULTANT, '小助手自我介紹一下'));
+    expect(intro.replies.find((r) => r.type === 'group')?.text).toContain('待命');
     expect(await getActiveIssueThread(TEST_GROUP)).toBeUndefined();
 
     const next = await processMessage(groupMsg(TEST_CUSTOMER, '怎麼登入後台'));

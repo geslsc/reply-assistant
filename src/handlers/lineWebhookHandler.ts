@@ -74,6 +74,7 @@ import {
 import { settleGroupTimeouts } from '../services/passiveTimeoutSettlement';
 import {
   handleIncomingCustomerGroupMessage,
+  resolveCollectingBuffersForThread,
   settleExpiredGroupBuffers,
 } from '../services/groupMessageConvergenceService';
 import {
@@ -178,6 +179,7 @@ async function handleClosingSignal(
 
   const fromState = thread.state;
   const issueThreadId = thread.issueThreadId;
+  await resolveCollectingBuffersForThread(groupId, issueThreadId);
   await resolveThread(groupId, issueThreadId);
   await logStateTransition({
     group_id: groupId,
@@ -200,6 +202,7 @@ async function resolveHumanTakeoverThreadOnResume(
     return;
   }
 
+  await resolveCollectingBuffersForThread(groupId, thread.issueThreadId);
   await resolveThread(groupId, thread.issueThreadId);
   await logStateTransition({
     group_id: groupId,
@@ -558,6 +561,7 @@ export async function processMessage(message: IncomingMessage): Promise<ProcessR
 
     if (assistantCommand === GROUP_ASSISTANT_COMMANDS.INTRO) {
       replies.push(...(await handleServiceIntroduction(groupId, message.userId)));
+      await resolveHumanTakeoverThreadOnResume(groupId, message.userId);
       replies.push(...sideEffectReplies);
       return { replies, events: await getEventLogs() };
     }
