@@ -238,16 +238,31 @@ async function handleCustomerQuestion(
   options?: { messageId?: string; timestamp?: string }
 ): Promise<BotReply[]> {
   if (await isMuted(groupId)) {
+    logger.info('Group customer message skipped', {
+      groupId,
+      userId,
+      reason: 'muted',
+    });
     return [];
   }
 
   const flags = await getGroupFlags(groupId);
   if (flags.mute && flags.waitingFlag) {
+    logger.info('Group customer message skipped', {
+      groupId,
+      userId,
+      reason: 'mute_waiting',
+    });
     return [];
   }
 
   if (await isOutOfService(groupId)) {
     if (!text.includes('@') && !text.includes('小助手')) {
+      logger.info('Group customer message skipped', {
+        groupId,
+        userId,
+        reason: 'out_of_service_without_mention',
+      });
       return [];
     }
   }
@@ -508,6 +523,12 @@ export async function processMessage(message: IncomingMessage): Promise<ProcessR
   }
 
   const isConsultant = await isActiveConsultantOrAdmin(message.userId);
+  logger.info('Group message classified', {
+    groupId,
+    userId: message.userId,
+    isConsultant,
+    textPreview: text.slice(0, 40),
+  });
 
   if (isConsultant) {
     if (isClosingSignal(text)) {
@@ -574,6 +595,12 @@ export async function processMessage(message: IncomingMessage): Promise<ProcessR
     }
 
     await handleConsultantHumanTakeover(groupId, message.userId, text);
+    logger.info('Group consultant message ignored for customer flow', {
+      groupId,
+      userId: message.userId,
+      reason: 'consultant_non_command',
+      textPreview: text.slice(0, 40),
+    });
     return { replies, events: await getEventLogs() };
   }
 
@@ -587,10 +614,20 @@ export async function processMessage(message: IncomingMessage): Promise<ProcessR
   }
 
   if (isClosingSignal(text)) {
+    logger.info('Group customer message skipped', {
+      groupId,
+      userId: message.userId,
+      reason: 'closing_signal',
+    });
     return { replies: [], events: await getEventLogs() };
   }
 
   if (isNannyPeriodApproximatePhrase(text)) {
+    logger.info('Group customer message skipped', {
+      groupId,
+      userId: message.userId,
+      reason: 'nanny_period_approximate_phrase',
+    });
     return { replies, events: await getEventLogs() };
   }
 
