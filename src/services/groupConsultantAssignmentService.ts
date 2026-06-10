@@ -9,8 +9,9 @@ import {
   isActiveAdmin,
 } from './consultantWhitelist';
 import {
-  GROUP_ASSISTANT_COMMANDS,
+  normalizeGroupAssistantCommand,
 } from './groupAssistantCommandService';
+import { updateGroupFlags } from './groupFlags';
 
 export function formatAssignmentGroupLabel(assignment: GroupConsultantAssignmentRecord): string {
   if (assignment.groupName) {
@@ -20,8 +21,7 @@ export function formatAssignmentGroupLabel(assignment: GroupConsultantAssignment
 }
 
 export function isValidGroupAssistantCommand(text: string): boolean {
-  const trimmed = text.trim();
-  return (Object.values(GROUP_ASSISTANT_COMMANDS) as string[]).includes(trimmed);
+  return normalizeGroupAssistantCommand(text) !== null;
 }
 
 export async function isActiveAssignee(userId: string | null): Promise<boolean> {
@@ -40,9 +40,29 @@ export async function getFallbackAdminUserId(): Promise<string | null> {
 async function resolveGroupName(groupId: string): Promise<string | null> {
   const lineName = await fetchLineGroupName(groupId);
   if (lineName) {
+    await updateGroupFlags(groupId, { groupName: lineName });
     return lineName;
   }
   return null;
+}
+
+async function hydrateMissingGroupName(
+  assignment: GroupConsultantAssignmentRecord
+): Promise<GroupConsultantAssignmentRecord> {
+  if (assignment.groupName) {
+    return assignment;
+  }
+
+  const groupName = await resolveGroupName(assignment.groupId);
+  if (!groupName) {
+    return assignment;
+  }
+
+  const updated = await getRepos().groupConsultantAssignments.update(assignment.groupId, {
+    groupName,
+    updatedBy: 'system',
+  });
+  return updated ?? assignment;
 }
 
 /** 新群組偵測：若 group_id 不存在則建立 assignment 記錄 */
@@ -58,10 +78,10 @@ export async function ensureGroupAssignment(
         updatedBy: 'system',
       });
       if (updated) {
-        return updated;
+        return hydrateMissingGroupName(updated);
       }
     }
-    return existing;
+    return hydrateMissingGroupName(existing);
   }
 
   const groupCode = await allocateGroupCode();

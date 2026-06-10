@@ -272,6 +272,95 @@ describe('Group message convergence and semantic routing', () => {
     expect(buffer!.messages).toHaveLength(1);
   });
 
+  it('does not treat consultant onboarding intro as human takeover', async () => {
+    resetEnvCache();
+    loadEnv({ USE_MEMORY_REPOS: true, DEBOUNCE_SECONDS: 60 });
+    clearConvergenceTimersForTest();
+
+    await processMessage(groupMsg(TEST_CUSTOMER, '怎麼使用計次券'));
+    const buffer = await getRepos().groupMessageBuffers.findCollectingByGroupAndCustomer(
+      TEST_GROUP,
+      TEST_CUSTOMER
+    );
+    expect(buffer).not.toBeNull();
+
+    const intro = await processMessage(
+      groupMsg(TEST_CONSULTANT, '老師好，我是 Nina 導入教練')
+    );
+    expect(intro.replies.find((r) => r.type === 'group')).toBeUndefined();
+
+    const replies = await processBufferByIdForTest(buffer!.bufferId);
+    expect(replies.find((r) => r.type === 'group')?.text).toContain('步驟一');
+  });
+
+  it('does not treat bot intro command as human takeover', async () => {
+    resetEnvCache();
+    loadEnv({ USE_MEMORY_REPOS: true, DEBOUNCE_SECONDS: 60 });
+    clearConvergenceTimersForTest();
+
+    await processMessage(groupMsg(TEST_CUSTOMER, '怎麼使用計次券'));
+    const buffer = await getRepos().groupMessageBuffers.findCollectingByGroupAndCustomer(
+      TEST_GROUP,
+      TEST_CUSTOMER
+    );
+    expect(buffer).not.toBeNull();
+
+    const intro = await processMessage(groupMsg(TEST_CONSULTANT, '自我介紹一下'));
+    expect(intro.replies.find((r) => r.type === 'group')?.text).toContain('待命');
+
+    const replies = await processBufferByIdForTest(buffer!.bufferId);
+    expect(replies.find((r) => r.type === 'group')?.text).toContain('步驟一');
+  });
+
+  it('still treats substantive consultant answers as human takeover', async () => {
+    resetEnvCache();
+    loadEnv({ USE_MEMORY_REPOS: true, DEBOUNCE_SECONDS: 60 });
+    clearConvergenceTimersForTest();
+
+    await processMessage(groupMsg(TEST_CUSTOMER, '怎麼使用計次券'));
+    const buffer = await getRepos().groupMessageBuffers.findCollectingByGroupAndCustomer(
+      TEST_GROUP,
+      TEST_CUSTOMER
+    );
+    expect(buffer).not.toBeNull();
+
+    await processMessage(groupMsg(TEST_CONSULTANT, '請到票券管理新增計次券'));
+
+    const replies = await processBufferByIdForTest(buffer!.bufferId);
+    expect(replies).toHaveLength(0);
+    expect((await getActiveIssueThread(TEST_GROUP))?.consultantAnswered).toBe(true);
+  });
+
+  it('allows consultant closing signal to end a takeover thread', async () => {
+    resetEnvCache();
+    loadEnv({ USE_MEMORY_REPOS: true, DEBOUNCE_SECONDS: 60 });
+    clearConvergenceTimersForTest();
+
+    await processMessage(groupMsg(TEST_CUSTOMER, '怎麼使用計次券'));
+    await processMessage(groupMsg(TEST_CONSULTANT, '請到票券管理新增計次券'));
+    expect((await getActiveIssueThread(TEST_GROUP))?.consultantAnswered).toBe(true);
+
+    await processMessage(groupMsg(TEST_CONSULTANT, 'OK'));
+
+    expect(await getActiveIssueThread(TEST_GROUP)).toBeUndefined();
+  });
+
+  it('resumes assistant after consultant takeover when consultant says 小助手再麻煩了', async () => {
+    resetEnvCache();
+    loadEnv({ USE_MEMORY_REPOS: true, DEBOUNCE_SECONDS: 0 });
+    clearConvergenceTimersForTest();
+
+    await processMessage(groupMsg(TEST_CUSTOMER, '怎麼使用計次券'));
+    await processMessage(groupMsg(TEST_CONSULTANT, '請到票券管理新增計次券'));
+    expect((await getActiveIssueThread(TEST_GROUP))?.consultantAnswered).toBe(true);
+
+    await processMessage(groupMsg(TEST_CONSULTANT, '小助手再麻煩了'));
+    expect(await getActiveIssueThread(TEST_GROUP)).toBeUndefined();
+
+    const next = await processMessage(groupMsg(TEST_CUSTOMER, '怎麼登入後台'));
+    expect(next.replies.find((r) => r.type === 'group')?.text).toContain('登入');
+  });
+
   it('settles expired buffer on next group event after restart', async () => {
     resetEnvCache();
     loadEnv({ USE_MEMORY_REPOS: true, DEBOUNCE_SECONDS: 60 });

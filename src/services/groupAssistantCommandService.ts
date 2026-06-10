@@ -28,6 +28,39 @@ export const GROUP_ASSISTANT_COMMANDS = {
   CORRECTION: '小助手這題我更正',
 } as const;
 
+export type GroupAssistantCommand =
+  (typeof GROUP_ASSISTANT_COMMANDS)[keyof typeof GROUP_ASSISTANT_COMMANDS];
+
+const GROUP_ASSISTANT_COMMAND_ALIASES: Record<string, GroupAssistantCommand> = {
+  小助手自我介紹一下: GROUP_ASSISTANT_COMMANDS.INTRO,
+  小助手介紹一下: GROUP_ASSISTANT_COMMANDS.INTRO,
+  小助手你會做什麼: GROUP_ASSISTANT_COMMANDS.INTRO,
+  小助手使用說明: GROUP_ASSISTANT_COMMANDS.INTRO,
+  自我介紹一下: GROUP_ASSISTANT_COMMANDS.INTRO,
+  介紹一下小助手: GROUP_ASSISTANT_COMMANDS.INTRO,
+  跟店家介紹小助手: GROUP_ASSISTANT_COMMANDS.INTRO,
+  小助手先休息一下: GROUP_ASSISTANT_COMMANDS.MUTE,
+  小助手先休息: GROUP_ASSISTANT_COMMANDS.MUTE,
+  小助手暫停一下: GROUP_ASSISTANT_COMMANDS.MUTE,
+  小助手暫停: GROUP_ASSISTANT_COMMANDS.MUTE,
+  小助手再麻煩了: GROUP_ASSISTANT_COMMANDS.UNMUTE,
+  小助手再麻煩一下: GROUP_ASSISTANT_COMMANDS.UNMUTE,
+  小助手回來: GROUP_ASSISTANT_COMMANDS.UNMUTE,
+  小助手醒醒: GROUP_ASSISTANT_COMMANDS.UNMUTE,
+  恢復小助手: GROUP_ASSISTANT_COMMANDS.UNMUTE,
+  喚醒小助手: GROUP_ASSISTANT_COMMANDS.UNMUTE,
+  小助手重新啟用教學協助期: GROUP_ASSISTANT_COMMANDS.REACTIVATE,
+  小助手重新啟用: GROUP_ASSISTANT_COMMANDS.REACTIVATE,
+  小助手這題我更正: GROUP_ASSISTANT_COMMANDS.CORRECTION,
+  小助手這題要更正: GROUP_ASSISTANT_COMMANDS.CORRECTION,
+  小助手這篇要改: GROUP_ASSISTANT_COMMANDS.CORRECTION,
+};
+
+export function normalizeGroupAssistantCommand(text: string): GroupAssistantCommand | null {
+  const trimmed = text.trim();
+  return GROUP_ASSISTANT_COMMAND_ALIASES[trimmed] ?? null;
+}
+
 /** 已停用舊語法 → 引導新語法（僅對 active admin / consultant 提示） */
 export const DEPRECATED_GROUP_SYNTAX_HINTS: Record<string, string> = {
   '小助手啟用保母期 30 天': '此語法已停用。請改用「小助手自我介紹一下」啟用 30 天教學協助期。',
@@ -36,8 +69,6 @@ export const DEPRECATED_GROUP_SYNTAX_HINTS: Record<string, string> = {
   開始保母期: '此語法已停用。請改用「小助手自我介紹一下」啟用 30 天教學協助期。',
   保母期: '此語法已停用。請改用「小助手自我介紹一下」啟用 30 天教學協助期。',
   開始協助: '此語法已停用。請改用「小助手自我介紹一下」啟用 30 天教學協助期。',
-  小助手先休息: '此語法已停用。請改用「小助手先休息一下」。',
-  小助手回來: '此語法已停用。請改用「小助手再麻煩了」。',
   小助手要麻煩你一下: '此語法已停用。請改用「小助手再麻煩了」。',
   '有什麼可以協助您的嗎?': '此語法已停用。顧問一般回覆店家時，小助手會保持沉默。',
   '有什麼可以協助您的嗎？': '此語法已停用。顧問一般回覆店家時，小助手會保持沉默。',

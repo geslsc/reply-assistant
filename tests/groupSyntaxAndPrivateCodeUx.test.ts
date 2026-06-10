@@ -46,6 +46,8 @@ import { handleDmSessionPrivateMessage } from '../src/services/dmSessionService'
 import { handlePrivateCodeNavigation } from '../src/services/privateCodeNavigationService';
 import { handlePrivateUsageGuide } from '../src/services/knowledgeCardUsageGuideHandler';
 import { setLlmClient } from '../src/services/knowledgeCardDraftService';
+import { setLineGroupSummaryClient } from '../src/services/lineGroupSummaryService';
+import { handleBotJoinGroup } from '../src/services/botJoinGroupService';
 import {
   resetTestState,
   TEST_ADMIN,
@@ -119,6 +121,16 @@ describe('group syntax and private code UX 2026-06-10', () => {
       expect((await getGroupFlags(TEST_GROUP)).mute).toBe(false);
     });
 
+    it('accepts natural unmute wording used in real groups', async () => {
+      await setupServicePeriod();
+      await processMessage(groupMsg(TEST_CONSULTANT, GROUP_ASSISTANT_COMMANDS.MUTE));
+
+      const unmute = await processMessage(groupMsg(TEST_CONSULTANT, '小助手再麻煩一下'));
+
+      expect(unmute.replies[0].text).toContain('隨時待命');
+      expect((await getGroupFlags(TEST_GROUP)).mute).toBe(false);
+    });
+
     it('reactivates service period with status reply', async () => {
       await setupServicePeriod();
       const result = await processMessage(
@@ -138,6 +150,39 @@ describe('group syntax and private code UX 2026-06-10', () => {
       await setupServicePeriod();
       const result = await processMessage(groupMsg(TEST_CONSULTANT, '我先看一下這題'));
       expect(result.replies).toHaveLength(0);
+    });
+
+    it('hydrates assignment with LINE group name before auto-bind notification', async () => {
+      setLineGroupSummaryClient({
+        async getGroupSummary() {
+          return { groupName: '小助手測試' };
+        },
+      });
+
+      const result = await processMessage(
+        groupMsg(TEST_CONSULTANT, GROUP_ASSISTANT_COMMANDS.INTRO)
+      );
+      const assignment = await getRepos().groupConsultantAssignments.findByGroupId(TEST_GROUP);
+
+      expect(assignment?.groupName).toBe('小助手測試');
+      expect(result.replies.some((reply) => reply.text.includes('小助手測試（G-01）'))).toBe(
+        true
+      );
+    });
+
+    it('stores LINE group name when the bot joins a new group', async () => {
+      setLineGroupSummaryClient({
+        async getGroupSummary() {
+          return { groupName: '小助手測試' };
+        },
+      });
+
+      await handleBotJoinGroup(TEST_GROUP);
+
+      const assignment = await getRepos().groupConsultantAssignments.findByGroupId(TEST_GROUP);
+      const flags = await getGroupFlags(TEST_GROUP);
+      expect(assignment?.groupName).toBe('小助手測試');
+      expect(flags.groupName).toBe('小助手測試');
     });
   });
 

@@ -4,6 +4,7 @@ import { clearAllPendingConfirmations } from '../../src/services/consultantConfi
 import { setLlmClient } from '../../src/services/knowledgeCardDraftService';
 import { setVisionClient } from '../../src/services/screenshotVisionService';
 import { setLineImageContentClient } from '../../src/services/lineImageContentService';
+import { setLineGroupSummaryClient } from '../../src/services/lineGroupSummaryService';
 import { clearKnowledgeCardWriteState } from '../../src/services/knowledgeCardWriteService';
 import { clearBulkImportState } from '../../src/services/knowledgeCardImportService';
 import { clearConvergenceTimersForTest } from '../../src/services/groupMessageConvergenceService';
@@ -17,6 +18,7 @@ export async function resetTestState(): Promise<void> {
   setLlmClient(null);
   setVisionClient(null);
   setLineImageContentClient(null);
+  setLineGroupSummaryClient(null);
   await initKnowledgeBase();
 }
 

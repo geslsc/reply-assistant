@@ -28,6 +28,8 @@ import {
   GROUP_ASSISTANT_COMMANDS,
   getDeprecatedSyntaxHint,
   isGroupCustomerUsageGuideRequest,
+  normalizeGroupAssistantCommand,
+  startsWithAssistantPrefix,
 } from '../services/groupAssistantCommandService';
 import {
   handleAssistantCorrection,
@@ -47,7 +49,14 @@ import {
   handleGroupUsageGuide,
   isUsageGuideRequest,
 } from '../services/knowledgeCardUsageGuideHandler';
-import { isNannyPeriodApproximatePhrase } from '../services/consultantIntentClassifier';
+import {
+  classifyConsultantIntent,
+  ConsultantIntent,
+  isConsultantPrivateAiIntent,
+  isDirectExecuteIntent,
+  isNannyPeriodApproximatePhrase,
+  requiresConfirmation,
+} from '../services/consultantIntentClassifier';
 import {
   consumePrivateFallbackHint,
   SIMPLIFIED_PRIVATE_FALLBACK_HINT,
@@ -82,7 +91,6 @@ import { handleMyServiceGroups, MY_SERVICE_GROUPS_PHRASE } from '../services/con
 import {
   ensureGroupAssignment,
   handleGroupConsultantSideEffects,
-  isValidGroupAssistantCommand,
   updateLastCustomerMessageAt,
 } from '../services/groupConsultantAssignmentService';
 import { handleDisabledConsultantGroupCommand } from '../services/disabledConsultantGroupService';
@@ -113,6 +121,36 @@ function isReopenSignal(text: string): boolean {
   return REOPEN_SIGNALS.some((s) => text.includes(s));
 }
 
+const CONSULTANT_ONBOARDING_PATTERNS: RegExp[] = [
+  /^(老師好|老師|大家|各位|店家|您好|你好|哈囉|嗨)[，,\s]*(我是|我這邊是).{0,30}(導入|教練|顧問|客服|客立樂|iCHEF|POS)/iu,
+  /^(我是|我這邊是).{0,30}(導入|教練|顧問|客服|客立樂|iCHEF|POS)/iu,
+  /(自我介紹|介紹一下小助手|跟店家介紹小助手)/u,
+];
+
+function isConsultantNonTakeoverMessage(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return true;
+  }
+
+  if (startsWithAssistantPrefix(trimmed) || normalizeGroupAssistantCommand(trimmed)) {
+    return true;
+  }
+
+  const { intent } = classifyConsultantIntent(trimmed);
+  if (
+    intent !== ConsultantIntent.UNKNOWN &&
+    (isDirectExecuteIntent(intent) ||
+      isConsultantPrivateAiIntent(intent) ||
+      requiresConfirmation(intent) ||
+      intent === ConsultantIntent.ENABLE_NANNY_PERIOD)
+  ) {
+    return true;
+  }
+
+  return CONSULTANT_ONBOARDING_PATTERNS.some((pattern) => pattern.test(trimmed));
+}
+
 async function handleClosingSignal(
   groupId: string,
   userId: string,
@@ -138,12 +176,36 @@ async function handleClosingSignal(
   return onThreadClosedAfterCorrection(groupId, issueThreadId);
 }
 
+async function resolveHumanTakeoverThreadOnResume(
+  groupId: string,
+  userId: string
+): Promise<void> {
+  const thread = await getActiveIssueThread(groupId);
+  if (!thread || (!thread.consultantAnswered && !thread.autoReplyBlocked)) {
+    return;
+  }
+
+  await resolveThread(groupId, thread.issueThreadId);
+  await logStateTransition({
+    group_id: groupId,
+    issue_thread_id: thread.issueThreadId,
+    from_state: thread.state,
+    to_state: ThreadState.IDLE,
+    actor: Actor.CONSULTANT,
+    actor_user_id: userId,
+    detail: 'assistant resumed after consultant takeover',
+  });
+}
+
 async function handleConsultantHumanTakeover(
   groupId: string,
   userId: string,
   text: string
 ): Promise<void> {
   if (text.length === 0) {
+    return;
+  }
+  if (isConsultantNonTakeoverMessage(text)) {
     return;
   }
   const thread = await getActiveIssueThread(groupId);
@@ -428,37 +490,50 @@ export async function processMessage(message: IncomingMessage): Promise<ProcessR
       return { replies, events: await getEventLogs() };
     }
 
-    const sideEffectReplies = isValidGroupAssistantCommand(text)
+    const assistantCommand = normalizeGroupAssistantCommand(text);
+    const sideEffectReplies = assistantCommand
       ? await handleGroupConsultantSideEffects({
           groupId,
           userId: message.userId,
-          text,
+          text: assistantCommand,
         })
       : [];
 
-    if (text === GROUP_ASSISTANT_COMMANDS.INTRO) {
+    if (assistantCommand === GROUP_ASSISTANT_COMMANDS.INTRO) {
       replies.push(...(await handleServiceIntroduction(groupId, message.userId)));
       replies.push(...sideEffectReplies);
       return { replies, events: await getEventLogs() };
     }
-    if (text === GROUP_ASSISTANT_COMMANDS.MUTE) {
+    if (assistantCommand === GROUP_ASSISTANT_COMMANDS.MUTE) {
       replies.push(...(await handleConsultantMute(groupId, message.userId, true)));
       replies.push(...sideEffectReplies);
       return { replies, events: await getEventLogs() };
     }
-    if (text === GROUP_ASSISTANT_COMMANDS.UNMUTE) {
+    if (assistantCommand === GROUP_ASSISTANT_COMMANDS.UNMUTE) {
       replies.push(...(await handleConsultantMute(groupId, message.userId, false)));
+      await resolveHumanTakeoverThreadOnResume(groupId, message.userId);
       replies.push(...sideEffectReplies);
       return { replies, events: await getEventLogs() };
     }
-    if (text === GROUP_ASSISTANT_COMMANDS.REACTIVATE) {
+    if (assistantCommand === GROUP_ASSISTANT_COMMANDS.REACTIVATE) {
       replies.push(...(await handleServiceReactivationDirect(groupId, message.userId)));
       replies.push(...sideEffectReplies);
       return { replies, events: await getEventLogs() };
     }
-    if (text === GROUP_ASSISTANT_COMMANDS.CORRECTION) {
+    if (assistantCommand === GROUP_ASSISTANT_COMMANDS.CORRECTION) {
       replies.push(...(await handleAssistantCorrection(groupId, message.userId)));
       replies.push(...sideEffectReplies);
+      return { replies, events: await getEventLogs() };
+    }
+
+    const naturalReplies = await handleConsultantNaturalLanguage({
+      userId: message.userId,
+      groupId,
+      text,
+      isGroup: true,
+    });
+    if (naturalReplies) {
+      replies.push(...naturalReplies);
       return { replies, events: await getEventLogs() };
     }
 
