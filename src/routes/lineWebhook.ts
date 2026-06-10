@@ -269,7 +269,7 @@ export async function handleLineWebhook(req: Request, res: Response): Promise<vo
           userId: mapped.userId,
           messageId: mapped.messageId,
         });
-        await deliverBotReplies(replies, mapped.replyToken);
+        await deliverBotReplies(replies, mapped.replyToken, mapped.userId);
         continue;
       }
 
@@ -292,7 +292,11 @@ export async function handleLineWebhook(req: Request, res: Response): Promise<vo
       }
 
       const result = await processMessage(textMessage);
-      await deliverBotReplies(result.replies, textMessage.replyToken);
+      await deliverBotReplies(
+        result.replies,
+        textMessage.replyToken,
+        textMessage.isGroup ? undefined : textMessage.userId
+      );
     }
     res.status(200).json({ ok: true });
   } catch (error) {

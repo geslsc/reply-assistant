@@ -99,7 +99,8 @@ export async function pushToConsultants(text: string): Promise<void> {
 
 export async function deliverBotReplies(
   replies: BotReply[],
-  replyToken?: string
+  replyToken?: string,
+  replyUserId?: string
 ): Promise<void> {
   const mergedGroupText = mergeGroupReplies(replies);
   if (replyToken && mergedGroupText.length > 0) {
@@ -108,8 +109,20 @@ export async function deliverBotReplies(
     logger.warn('Group replies without replyToken cannot be delivered inline');
   }
 
+  const inlinePrivateReplies =
+    replyToken && !mergedGroupText && replyUserId
+      ? replies.filter((reply) => reply.type === 'push' && reply.userId === replyUserId)
+      : [];
+
+  if (inlinePrivateReplies.length > 0 && replyToken) {
+    await replyText(replyToken, inlinePrivateReplies.map((reply) => reply.text).join('\n\n'));
+  }
+
   for (const reply of replies) {
     if (reply.type === 'push' && reply.userId) {
+      if (inlinePrivateReplies.includes(reply)) {
+        continue;
+      }
       const messageId = await pushText(reply.userId, reply.text);
       if (reply.trackReviewId && messageId) {
         await registerReviewMessageMapping(reply.trackReviewId, messageId);

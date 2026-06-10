@@ -273,10 +273,11 @@ describe('LINE Webhook Tests', () => {
     await approveConsultant(TEST_ADMIN, TEST_CONSULTANT);
     await seedActiveSessionForTest({ userId: TEST_CONSULTANT, card: sampleCard });
 
+    const repliedTexts: string[] = [];
     const pushedTexts: string[] = [];
     setLineMessageClient({
-      async replyText() {
-        throw new Error('private cancel should use pushMessage');
+      async replyText(_replyToken, text) {
+        repliedTexts.push(text);
       },
       async pushText(_userId, text) {
         pushedTexts.push(text);
@@ -306,6 +307,7 @@ describe('LINE Webhook Tests', () => {
       .send(body)
       .expect(200);
 
-    expect(pushedTexts).toEqual(['已取消目前知識卡整理流程，草稿資料已保留。']);
+    expect(repliedTexts).toEqual(['已取消目前知識卡整理流程，草稿資料已保留。']);
+    expect(pushedTexts).toEqual([]);
   });
 });

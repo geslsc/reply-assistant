@@ -98,4 +98,37 @@ describe('LINE Reply / Push Tests', () => {
       deliverBotReplies([{ type: 'group', text: 'test' }], 'reply-token')
     ).resolves.toBeUndefined();
   });
+
+  it('uses replyMessage for private replies to the triggering user', async () => {
+    const replyText = jest.fn().mockResolvedValue(undefined);
+    const pushText = jest.fn().mockResolvedValue(null);
+    setLineMessageClient({ replyText, pushText });
+
+    await deliverBotReplies(
+      [{ type: 'push', userId: TEST_ADMIN, text: '使用說明內容' }],
+      'reply-token-private',
+      TEST_ADMIN
+    );
+
+    expect(replyText).toHaveBeenCalledWith('reply-token-private', '使用說明內容');
+    expect(pushText).not.toHaveBeenCalled();
+  });
+
+  it('keeps pushing private replies that target other users', async () => {
+    const replyText = jest.fn().mockResolvedValue(undefined);
+    const pushText = jest.fn().mockResolvedValue('mock-id');
+    setLineMessageClient({ replyText, pushText });
+
+    await deliverBotReplies(
+      [
+        { type: 'push', userId: TEST_ADMIN, text: '已核准' },
+        { type: 'push', userId: TEST_CONSULTANT, text: '您已核准' },
+      ],
+      'reply-token-private',
+      TEST_ADMIN
+    );
+
+    expect(replyText).toHaveBeenCalledWith('reply-token-private', '已核准');
+    expect(pushText).toHaveBeenCalledWith(TEST_CONSULTANT, '您已核准');
+  });
 });
