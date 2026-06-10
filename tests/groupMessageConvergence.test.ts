@@ -21,6 +21,7 @@ import {
   processBufferByIdForTest,
   runPendingConvergenceTimersForTest,
   settleExpiredGroupBuffers,
+  settleExpiredGroupBuffersGlobally,
 } from '../src/services/groupMessageConvergenceService';
 import { classifyCustomerQuestion } from '../src/services/groupSemanticRoutingService';
 import {
@@ -382,6 +383,33 @@ describe('Group message convergence and semantic routing', () => {
     expect(
       settled.some((r) => r.type === 'group' && r.text === buildPublicAnswer(loginCard.standard_answer))
     ).toBe(true);
+  });
+
+  it('settles expired buffers globally after restart without waiting for another group event', async () => {
+    resetEnvCache();
+    loadEnv({ USE_MEMORY_REPOS: true, DEBOUNCE_SECONDS: 60 });
+    clearConvergenceTimersForTest();
+
+    await processMessage(groupMsg(TEST_CUSTOMER, '怎麼登入後台'));
+    const buffer = await getRepos().groupMessageBuffers.findCollectingByGroupAndCustomer(
+      TEST_GROUP,
+      TEST_CUSTOMER
+    );
+    expect(buffer).not.toBeNull();
+
+    clearConvergenceTimersForTest();
+    const loginCard = getCardById('op-login')!;
+    const settled = await settleExpiredGroupBuffersGlobally(new Date(Date.now() + 61_000));
+
+    expect(
+      settled.some((r) => r.type === 'group' && r.text === buildPublicAnswer(loginCard.standard_answer))
+    ).toBe(true);
+    expect(
+      await getRepos().groupMessageBuffers.findCollectingByGroupAndCustomer(
+        TEST_GROUP,
+        TEST_CUSTOMER
+      )
+    ).toBeNull();
   });
 
   it('ignores emoji-only and short acknowledgements', async () => {

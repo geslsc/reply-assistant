@@ -4,7 +4,10 @@ import { getRepos, initRepositories } from './repositories';
 import { initConsultantDraftAi } from './services/openaiClient';
 import { initScreenshotVisionClient } from './services/screenshotVisionService';
 import { initKnowledgeBase } from './services/knowledgeBaseService';
-import { setAsyncConvergenceReplyDeliverer } from './services/groupMessageConvergenceService';
+import {
+  setAsyncConvergenceReplyDeliverer,
+  startGroupConvergenceSweeper,
+} from './services/groupMessageConvergenceService';
 import { deliverDeferredGroupReplies } from './services/lineMessageService';
 
 export async function bootstrapAdmins(): Promise<void> {
@@ -35,5 +38,8 @@ export async function bootstrapApp(): Promise<void> {
   setAsyncConvergenceReplyDeliverer(async (replies, groupId) => {
     await deliverDeferredGroupReplies(replies, groupId);
   });
+  if (getEnv().NODE_ENV !== 'test') {
+    startGroupConvergenceSweeper();
+  }
   await bootstrapAdmins();
 }

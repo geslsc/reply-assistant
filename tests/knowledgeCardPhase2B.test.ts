@@ -82,7 +82,8 @@ describe('Knowledge card Phase 2-B dm_sessions flow', () => {
       userId: TEST_CONSULTANT,
       text: '幫我整理知識卡',
     });
-    expect(replies?.[0].text).toMatch(/請提供以下資訊/);
+    expect(replies?.[0].text).toMatch(/請用下面格式提供內容/);
+    expect(replies?.[0].text).toMatch(/店家問題：/);
     const session = await getRepos().dmSessions.findActiveByUserId(TEST_CONSULTANT);
     expect(session?.sessionType).toBe('knowledge_draft');
     expect(session?.status).toBe('active');

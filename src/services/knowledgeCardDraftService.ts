@@ -120,6 +120,103 @@ function buildSplitMergeSuggestion(operation: 'split' | 'merge', consultantReque
   ].join('\n');
 }
 
+function cleanInputLine(line: string): string {
+  return line
+    .replace(/^[\s\-*•、，,。.:：]+/u, '')
+    .replace(/^\d+[.)、]\s*/u, '')
+    .trim();
+}
+
+function extractLinesAfterLabel(text: string, labelPattern: RegExp): string[] {
+  const lines = text
+    .split(/\r?\n/u)
+    .map(cleanInputLine)
+    .filter(Boolean);
+  const result: string[] = [];
+  let collecting = false;
+
+  for (const line of lines) {
+    if (labelPattern.test(line)) {
+      collecting = true;
+      continue;
+    }
+    if (collecting && /(我的回覆|建議回覆|回答|解法|適用|不適用|導入|教練)/u.test(line)) {
+      break;
+    }
+    if (collecting) {
+      result.push(line);
+    }
+  }
+
+  return result;
+}
+
+function inferPatternsFromRequest(text: string): string[] {
+  const explicitQuestions = extractLinesAfterLabel(text, /(店家問題|店家常問|可能會問|問題範例)/u);
+  const candidates = explicitQuestions.length > 0
+    ? explicitQuestions
+    : text
+        .split(/\r?\n/u)
+        .map(cleanInputLine)
+        .filter((line) => hasProblemClue(line));
+
+  return [...new Set(candidates)]
+    .filter((line) => !/(我的回覆|建議回覆|回答|解法|適用|不適用|導入|教練)/u.test(line))
+    .slice(0, 5);
+}
+
+function inferTitleFromPatterns(patterns: string[]): string {
+  const first = patterns[0]?.replace(/[？?。.!！]/gu, '').trim();
+  if (!first) {
+    return '操作使用常見問題';
+  }
+  return `${first}常見問題`;
+}
+
+function repairDraftCardStructure(
+  rawCard: Partial<KnowledgeCard>,
+  consultantRequest: string
+): Partial<KnowledgeCard> {
+  const repaired: Partial<KnowledgeCard> = { ...rawCard };
+  const patterns = Array.isArray(repaired.patterns)
+    ? repaired.patterns.filter((pattern): pattern is string => typeof pattern === 'string' && pattern.trim() !== '')
+    : [];
+
+  if (patterns.length === 0) {
+    repaired.patterns = inferPatternsFromRequest(consultantRequest);
+  }
+
+  if (typeof repaired.title !== 'string' || repaired.title.trim() === '') {
+    repaired.title = inferTitleFromPatterns(repaired.patterns ?? []);
+  }
+
+  if (!Array.isArray(repaired.not_applicable)) {
+    repaired.not_applicable = [];
+  }
+
+  if (!Array.isArray(repaired.escalate_to_consultant)) {
+    repaired.escalate_to_consultant = [];
+  }
+
+  if (repaired.not_applicable.length === 0) {
+    repaired.not_applicable = ['店家畫面或流程與草稿步驟不一致時，不適用直接照此回覆。'];
+  }
+
+  if (repaired.escalate_to_consultant.length === 0) {
+    repaired.escalate_to_consultant = ['店家仍找不到設定入口、畫面異常，或涉及金額/帳務/權限時，請導入教練協助確認。'];
+  }
+
+  if (typeof repaired.status !== 'string' || repaired.status.trim() === '') {
+    repaired.status = '可用';
+  }
+
+  if (typeof repaired.card_id !== 'string' || repaired.card_id.trim() === '') {
+    repaired.card_id = PENDING_CARD_ID;
+  }
+
+  return repaired;
+}
+
 export async function generateKnowledgeCardDraft(params: {
   operation: KnowledgeDraftOperation;
   consultantRequest: string;
@@ -197,7 +294,10 @@ export async function generateKnowledgeCardDraft(params: {
 
   const attemptedCard =
     typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
-      ? postProcessDraftCard(parsed as KnowledgeCard, sessionContext ?? {})
+      ? postProcessDraftCard(
+          repairDraftCardStructure(parsed as Partial<KnowledgeCard>, consultantRequest) as KnowledgeCard,
+          sessionContext ?? {}
+        )
       : null;
   const validation = enforceKnowledgeCardRules(attemptedCard ?? parsed);
   if (!validation.valid || !validation.normalized) {

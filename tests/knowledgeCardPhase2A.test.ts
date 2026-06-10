@@ -139,7 +139,8 @@ describe('Knowledge card Phase 2-A', () => {
       userId: TEST_CONSULTANT,
       text: '幫我整理知識卡',
     });
-    expect(replies?.[0].text).toMatch(/請提供以下資訊/);
+    expect(replies?.[0].text).toMatch(/請用下面格式提供內容/);
+    expect(replies?.[0].text).toMatch(/店家問題：/);
     const session = await getRepos().dmSessions.findActiveByUserId(TEST_CONSULTANT);
     expect(session?.status).toBe('active');
   });
@@ -153,6 +154,43 @@ describe('Knowledge card Phase 2-A', () => {
       text: '整理知識卡：好',
     });
     expect(replies?.[0].text).toBe(INSUFFICIENT_DRAFT_INPUT_MESSAGE);
+  });
+
+  it('repairs missing patterns from provided store question instead of failing validation', async () => {
+    setLlmClient({
+      complete: jest.fn().mockResolvedValue(
+        JSON.stringify({
+          card_id: '__pending__',
+          title: '儲值卡設定常見問題',
+          patterns: [],
+          risk_level: 'low',
+          can_public_reply: false,
+          standard_answer: '請至設定中的票券管理新增儲值卡。',
+          not_applicable: [],
+          escalate_to_consultant: [],
+          status: '可用',
+        })
+      ),
+    });
+    await handleDmSessionPrivateMessage({
+      userId: TEST_CONSULTANT,
+      text: '幫我整理知識卡',
+    });
+
+    const replies = await handleDmSessionPrivateMessage({
+      userId: TEST_CONSULTANT,
+      text: [
+        '店家問題：',
+        '怎麼設定儲值',
+        '',
+        '我的回覆：',
+        '操作步驟可以從設定進去，先新增儲值卡。',
+      ].join('\n'),
+    });
+
+    expect(replies?.[0].text).toContain('【知識卡草稿｜新增】');
+    expect(replies?.[0].text).toContain('怎麼設定儲值');
+    expect(replies?.[0].text).not.toContain('【驗證失敗】');
   });
 
   it('confirm submit writes pending_knowledge_reviews with pending status', async () => {

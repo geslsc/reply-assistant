@@ -18,6 +18,8 @@ import {
 
 const debounceTimers = new Map<string, NodeJS.Timeout>();
 const processingBuffers = new Set<string>();
+let sweepTimer: NodeJS.Timeout | null = null;
+let sweepInProgress = false;
 
 type AsyncReplyDeliverer = (replies: BotReply[], groupId: string) => Promise<void>;
 
@@ -34,6 +36,11 @@ export function clearConvergenceTimersForTest(): void {
     clearTimeout(timer);
   }
   debounceTimers.clear();
+  if (sweepTimer) {
+    clearInterval(sweepTimer);
+    sweepTimer = null;
+  }
+  sweepInProgress = false;
   processingBuffers.clear();
 }
 
@@ -251,6 +258,64 @@ export async function settleExpiredGroupBuffers(
     replies.push(...(await processBuffer(buffer)));
   }
   return replies;
+}
+
+export async function settleExpiredGroupBuffersGlobally(
+  now = new Date(),
+  options?: { useAsyncDelivery?: boolean }
+): Promise<BotReply[]> {
+  const cutoff = getDebounceCutoffIso(now);
+  const expired = await getRepos().groupMessageBuffers.findExpiredCollecting(cutoff);
+  const replies: BotReply[] = [];
+
+  for (const buffer of expired) {
+    cancelDebounceTimer(buffer.bufferId);
+    replies.push(...(await processBuffer(buffer, options)));
+  }
+
+  return replies;
+}
+
+export function startGroupConvergenceSweeper(intervalSeconds?: number): void {
+  if (sweepTimer) {
+    return;
+  }
+
+  const intervalMs = Math.max(0, intervalSeconds ?? getEnv().GROUP_CONVERGENCE_SWEEP_SECONDS) * 1000;
+  if (intervalMs <= 0) {
+    logger.info('Group convergence sweeper disabled');
+    return;
+  }
+
+  const run = async (): Promise<void> => {
+    if (sweepInProgress) {
+      return;
+    }
+    sweepInProgress = true;
+    try {
+      const replies = await settleExpiredGroupBuffersGlobally(new Date(), {
+        useAsyncDelivery: true,
+      });
+      if (replies.length > 0) {
+        logger.info('Expired group buffers settled by sweeper', {
+          replyCount: replies.length,
+        });
+      }
+    } catch (error) {
+      logger.error('Group convergence sweeper failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      sweepInProgress = false;
+    }
+  };
+
+  void run();
+  sweepTimer = setInterval(() => {
+    void run();
+  }, intervalMs);
+  sweepTimer.unref?.();
+  logger.info('Group convergence sweeper started', { intervalSeconds: intervalMs / 1000 });
 }
 
 export async function flushCollectingBuffersForGroup(groupId: string): Promise<BotReply[]> {
