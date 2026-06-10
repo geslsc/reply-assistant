@@ -240,7 +240,10 @@ describe('LINE Reply / Push Tests', () => {
     });
     await deliverBotReplies(result.replies, 'reply-token');
 
-    expect(replyText).toHaveBeenCalledWith('reply-token', '這題我先記下來，請稍等一下喔。');
+    expect(replyText).toHaveBeenCalledWith(
+      'reply-token',
+      '您的問題我已經記下並請導入教練協助確認，請稍等一下喔。'
+    );
     expect(replyText).not.toHaveBeenCalledWith(
       'reply-token',
       expect.stringContaining('查看待處理問題')

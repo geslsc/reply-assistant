@@ -168,7 +168,7 @@ export const PUBLIC_REPLY_SUFFIX =
 
 /** 不公開回答時對店家的固定緩衝話術（不可由 LLM 生成） */
 export const CUSTOMER_HANDOFF_BUFFER_MESSAGE =
-  '這題我先記下來，請稍等一下喔。';
+  '您的問題我已經記下並請導入教練協助確認，請稍等一下喔。';
 
 export const STANDBY_PHRASES = [
   '有什麼可以協助您的嗎?',
