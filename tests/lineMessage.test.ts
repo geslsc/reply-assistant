@@ -240,10 +240,12 @@ describe('LINE Reply / Push Tests', () => {
     });
     await deliverBotReplies(result.replies, 'reply-token');
 
-    expect(replyText).toHaveBeenCalledWith(
+    expect(replyText).toHaveBeenCalledWith('reply-token', '這題我先記下來，請稍等一下喔。');
+    expect(replyText).not.toHaveBeenCalledWith(
       'reply-token',
       expect.stringContaining('查看待處理問題')
     );
+    expect(replyText).not.toHaveBeenCalledWith('reply-token', expect.stringContaining('私訊'));
     expect(pushText).toHaveBeenCalledWith(TEST_ADMIN, expect.stringContaining('【問題收斂卡】'));
     expect(await getRepos().pendingHandoffs.findOpenByConsultant(TEST_ADMIN)).toHaveLength(1);
 

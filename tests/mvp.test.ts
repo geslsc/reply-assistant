@@ -150,9 +150,7 @@ describe('MVP Core Tests', () => {
       const result = await processMessage(groupMsg(TEST_CUSTOMER, '畫面一片空白'));
 
       const groupReply = result.replies.find((r) => r.type === 'group');
-      expect(groupReply?.text).toBe(
-        '您的問題我已經記下並請顧問協助確認，請稍等一下喔。\n若顧問沒有收到私訊，請私訊小助手輸入「查看待處理問題」。'
-      );
+      expect(groupReply?.text).toBe('這題我先記下來，請稍等一下喔。');
       expect(result.replies.filter((r) => r.type === 'push').length).toBeGreaterThan(0);
       expect((await getEventsByType(EventType.HANDOFF_TO_CONSULTANT)).length).toBe(1);
     });
