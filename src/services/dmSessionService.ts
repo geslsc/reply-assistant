@@ -132,6 +132,17 @@ function isAmbiguousAck(text: string): boolean {
   return AMBIGUOUS_ACK_PHRASES.includes(text.trim() as (typeof AMBIGUOUS_ACK_PHRASES)[number]);
 }
 
+function isExplicitDraftApprovalPhrase(text: string): boolean {
+  const trimmed = text.trim();
+  return (
+    isVisionConfirmPhrase(trimmed) ||
+    /^對[，,]?\s*(可以|沒錯|正確)?[，,]?\s*(幫我)?(整理成知識卡|送出|送審)$/u.test(
+      trimmed
+    ) ||
+    /^(沒錯|正確|可以)[，,]?\s*(幫我)?(整理成知識卡|送出|送審)$/u.test(trimmed)
+  );
+}
+
 function draftDataToStoredDraft(session: DmSessionRecord): StoredDraft | undefined {
   const card = session.draftData?.card ?? session.draftData?.lastInvalidDraft;
   if (!card) {
@@ -876,7 +887,10 @@ export async function handleDmSessionPrivateMessage(
   }
 
   if (isVisionConfirmPhrase(trimmed)) {
-    return handleVisionConfirm(ctx);
+    const activeSession = await getActiveSession(ctx.userId);
+    if (activeSession?.draftData?.pendingVisionSummary) {
+      return handleVisionConfirm(ctx);
+    }
   }
 
   if (SUPPLEMENT_PATTERN.test(trimmed) || MODIFY_PATTERN.test(trimmed)) {
@@ -901,6 +915,23 @@ export async function handleDmSessionPrivateMessage(
       return pushReply(ctx.userId, NO_ACTIVE_DRAFT_SESSION_MESSAGE);
     }
     return null;
+  }
+
+  if (isExplicitDraftApprovalPhrase(trimmed)) {
+    if (!activeSession.draftData?.card) {
+      return pushReply(
+        ctx.userId,
+        '目前草稿尚未整理完成，請先補充內容，或等我產出草稿後再確認。'
+      );
+    }
+    if (await isActiveAdmin(ctx.userId)) {
+      return handleConsultantConfirmUpdateAttempt({
+        userId: ctx.userId,
+        text: '確認更新',
+        quotedMessageId: ctx.quotedMessageId,
+      });
+    }
+    return handleConsultantConfirmSubmit(ctx.userId);
   }
 
   if (isAmbiguousAck(trimmed)) {

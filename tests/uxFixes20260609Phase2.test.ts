@@ -76,6 +76,30 @@ const invalidBillingCard = {
   standard_answer: '請先對帳',
 };
 
+const quickCheckoutCard: KnowledgeCard = {
+  card_id: 'kc-20260609-002',
+  title: '快速結帳功能常見問題',
+  patterns: ['快速結帳功能在哪裡', '如何新增快速結帳單'],
+  risk_level: RiskLevel.LOW,
+  can_public_reply: true,
+  standard_answer: '可以在行事曆畫面右上角按 +，選擇新增快速結帳單。',
+  not_applicable: [],
+  escalate_to_consultant: [],
+  status: '可用',
+};
+
+const regularCheckoutCard: KnowledgeCard = {
+  card_id: 'regular-checkout',
+  title: '一般結帳流程',
+  patterns: ['客人怎麼結帳', '如何完成結帳'],
+  risk_level: RiskLevel.LOW,
+  can_public_reply: true,
+  standard_answer: '請進入訂單後確認品項，再按結帳完成。',
+  not_applicable: [],
+  escalate_to_consultant: [],
+  status: '可用',
+};
+
 async function setupConsultant(): Promise<void> {
   await registerAdmin(TEST_ADMIN, 'Admin');
   await registerInviteCode('P2CODE', TEST_ADMIN);
@@ -86,6 +110,17 @@ async function setupConsultant(): Promise<void> {
 async function seedStoredValueCard(): Promise<void> {
   await writeKnowledgeCardWithValidation({
     card: billingTutorialCard,
+    operatorUserId: TEST_ADMIN,
+    operation: 'create',
+    summary: 'test seed',
+    logValidationFailure: false,
+  });
+  await refreshKnowledgeCache();
+}
+
+async function seedKnowledgeCard(card: KnowledgeCard): Promise<void> {
+  await writeKnowledgeCardWithValidation({
+    card,
     operatorUserId: TEST_ADMIN,
     operation: 'create',
     summary: 'test seed',
@@ -468,6 +503,51 @@ describe('UX fixes 2026-06-09 phase 2', () => {
       const result = await exportKnowledgeCards(TEST_ADMIN, 'all');
       expect(result.replies[0].text).toMatch(/"card_id"/);
       expect(result.replies[0].text).toMatch(/created_by/);
+    });
+
+    it('finds a knowledge card by full card_id through 查詢知識卡', async () => {
+      await seedKnowledgeCard(quickCheckoutCard);
+
+      const replies = await handleKnowledgeCardCommand({
+        userId: TEST_CONSULTANT,
+        text: '查詢知識卡 kc-20260609-002',
+      });
+
+      expect(replies?.[0].text).toMatch(/快速結帳功能常見問題/);
+      expect(replies?.[0].text).toMatch(/知識卡編號：kc-20260609-002/);
+      expect(replies?.[0].text).toMatch(/修改知識卡 kc-20260609-002/);
+    });
+
+    it('searches by relevant keyword instead of broad single-token checkout matches', async () => {
+      await seedKnowledgeCard(quickCheckoutCard);
+      await seedKnowledgeCard(regularCheckoutCard);
+
+      const replies = await handleKnowledgeCardCommand({
+        userId: TEST_CONSULTANT,
+        text: '搜尋 快速結帳',
+      });
+
+      expect(replies?.[0].text).toMatch(/快速結帳功能常見問題/);
+      expect(replies?.[0].text).not.toMatch(/一般結帳流程/);
+    });
+  });
+
+  describe('active dm draft confirmation wording', () => {
+    it('treats 對，幫我整理成知識卡 as confirm submit instead of regenerating', async () => {
+      await seedActiveSessionForTest({
+        userId: TEST_CONSULTANT,
+        card: quickCheckoutCard,
+        draftText: formatHumanReadableKnowledgeCard(quickCheckoutCard, { draftMode: 'create' }),
+      });
+
+      const replies = await handleDmSessionPrivateMessage({
+        userId: TEST_CONSULTANT,
+        text: '對，幫我整理成知識卡',
+      });
+
+      expect(replies?.[0].text).toMatch(/已送出草稿給 admin 審核/);
+      expect(await getRepos().dmSessions.findActiveByUserId(TEST_CONSULTANT)).toBeNull();
+      expect(await getRepos().pendingKnowledgeReviews.listPending()).toHaveLength(1);
     });
   });
 

@@ -4,11 +4,9 @@ import { isActiveAdmin, isActiveConsultantOrAdmin, getConsultant } from './consu
 import { splitLongText } from './knowledgeCardExportService';
 import { DbKnowledgeCardRecord } from '../schemas/knowledgeCardDbSchema';
 import { dbRecordToKnowledgeCard } from '../schemas/knowledgeCardDbSchema';
-import { knowledgeCardMatchesQuery } from '../utils/knowledgeCardSearchMatch';
-
-function cardMatchesQuery(record: DbKnowledgeCardRecord, query: string): boolean {
-  return knowledgeCardMatchesQuery(record, query);
-}
+import {
+  scoreKnowledgeCardSearchMatch,
+} from '../utils/knowledgeCardSearchMatch';
 
 function describePublicReplyForView(record: DbKnowledgeCardRecord): { label: string; reason?: string } {
   if (record.canPublicReply && record.riskLevel === RiskLevel.LOW) {
@@ -37,8 +35,10 @@ function formatCardNumber(cardId: string): string {
 export function formatHumanReadableKnowledgeCardView(record: DbKnowledgeCardRecord): string {
   const card = dbRecordToKnowledgeCard(record);
   const publicReply = describePublicReplyForView(record);
+  const shortNumber = formatCardNumber(card.card_id);
   const lines: string[] = [
-    `【知識卡】${card.title}（${formatCardNumber(card.card_id)}）`,
+    `【知識卡】${card.title}（${shortNumber}）`,
+    `知識卡編號：${card.card_id}`,
     '',
     '店家可能會問：',
     ...card.patterns.map((pattern) => `- ${pattern}`),
@@ -63,6 +63,15 @@ export function formatHumanReadableKnowledgeCardView(record: DbKnowledgeCardReco
   if (publicReply.reason) {
     lines.push(`原因：${publicReply.reason}`);
   }
+
+  lines.push(
+    '',
+    '可複製指令：',
+    `- 查詢知識卡 ${card.card_id}`,
+    `- 修改知識卡 ${card.card_id}`,
+    `- 暫停知識卡 ${card.card_id}`,
+    `- 恢復知識卡 ${card.card_id}`
+  );
 
   return lines.join('\n');
 }
@@ -145,22 +154,25 @@ export async function searchKnowledgeCards(userId: string, query: string): Promi
     return blocked;
   }
 
-  const repoResults = await getRepos().knowledgeCards.search(query);
-  const filtered = await filterRecordsForUser(userId, repoResults);
-  const fallbackFiltered = (
-    filtered.length > 0
-      ? filtered
-      : await filterRecordsForUser(
-          userId,
-          (await getRepos().knowledgeCards.findAll()).filter((record) =>
-            cardMatchesQuery(record, query)
-          )
-        )
-  ).filter((record) => cardMatchesQuery(record, query));
+  const normalizedQuery = query.trim();
+  const exact = await getRepos().knowledgeCards.findById(normalizedQuery);
+  const exactVisible = exact ? await filterRecordsForUser(userId, [exact]) : [];
+  const ranked =
+    exactVisible.length > 0
+      ? exactVisible
+      : (await filterRecordsForUser(userId, await getRepos().knowledgeCards.findAll()))
+          .map((record) => ({
+            record,
+            score: scoreKnowledgeCardSearchMatch(record, normalizedQuery),
+          }))
+          .filter((item) => item.score > 0)
+          .sort((a, b) => b.score - a.score || a.record.cardId.localeCompare(b.record.cardId))
+          .slice(0, 5)
+          .map((item) => item.record);
 
   const text = formatResultList({
     title: `【知識卡查詢：${query}】`,
-    records: fallbackFiltered,
+    records: ranked,
     emptyMessage: '（找不到相關知識卡）',
   });
   return splitLongText(text).map((chunk) => ({ type: 'push' as const, userId, text: chunk }));
