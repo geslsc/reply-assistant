@@ -215,6 +215,21 @@ async function resolveHumanTakeoverThreadOnResume(
   });
 }
 
+async function ensureServicePeriodForResume(
+  groupId: string,
+  userId: string,
+  options?: { preferIntro?: boolean }
+): Promise<BotReply[]> {
+  if (!(await isOutOfService(groupId))) {
+    return [];
+  }
+  const flags = await getGroupFlags(groupId);
+  if (options?.preferIntro && !flags.serviceStartAt) {
+    return handleServiceIntroduction(groupId, userId);
+  }
+  return handleServiceReactivationDirect(groupId, userId);
+}
+
 async function handleConsultantHumanTakeover(
   groupId: string,
   userId: string,
@@ -560,7 +575,12 @@ export async function processMessage(message: IncomingMessage): Promise<ProcessR
       : [];
 
     if (assistantCommand === GROUP_ASSISTANT_COMMANDS.INTRO) {
-      replies.push(...(await handleServiceIntroduction(groupId, message.userId)));
+      replies.push(
+        ...(await ensureServicePeriodForResume(groupId, message.userId, { preferIntro: true }))
+      );
+      if (replies.length === 0) {
+        replies.push(...(await handleServiceIntroduction(groupId, message.userId)));
+      }
       await resolveHumanTakeoverThreadOnResume(groupId, message.userId);
       replies.push(...sideEffectReplies);
       return { replies, events: await getEventLogs() };
@@ -573,6 +593,7 @@ export async function processMessage(message: IncomingMessage): Promise<ProcessR
     if (assistantCommand === GROUP_ASSISTANT_COMMANDS.UNMUTE) {
       replies.push(...(await handleConsultantMute(groupId, message.userId, false)));
       await resolveHumanTakeoverThreadOnResume(groupId, message.userId);
+      replies.push(...(await ensureServicePeriodForResume(groupId, message.userId)));
       replies.push(...sideEffectReplies);
       return { replies, events: await getEventLogs() };
     }

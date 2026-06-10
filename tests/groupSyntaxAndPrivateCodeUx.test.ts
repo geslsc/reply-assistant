@@ -131,6 +131,46 @@ describe('group syntax and private code UX 2026-06-10', () => {
       expect((await getGroupFlags(TEST_GROUP)).mute).toBe(false);
     });
 
+    it('unmute reactivates expired service period so the next customer question is handled', async () => {
+      await setupServicePeriod();
+      await getRepos().groups.update(TEST_GROUP, {
+        serviceStartAt: new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString(),
+        serviceEndAt: new Date(Date.now() - 60_000).toISOString(),
+      });
+
+      const unmute = await processMessage(
+        groupMsg(TEST_CONSULTANT, GROUP_ASSISTANT_COMMANDS.UNMUTE)
+      );
+      expect(unmute.replies.some((reply) => reply.text?.includes('已重新啟用教學協助期'))).toBe(
+        true
+      );
+
+      const next = await processMessage(
+        groupMsg(TEST_CUSTOMER, '我的官方 LINE 串接好了，要怎麼讓客人預約？')
+      );
+      expect(next.replies.find((reply) => reply.type === 'group')?.text).toBeTruthy();
+    });
+
+    it('self introduction reactivates expired service period before customer questions', async () => {
+      await setupServicePeriod();
+      await getRepos().groups.update(TEST_GROUP, {
+        serviceStartAt: new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString(),
+        serviceEndAt: new Date(Date.now() - 60_000).toISOString(),
+      });
+
+      const intro = await processMessage(
+        groupMsg(TEST_CONSULTANT, GROUP_ASSISTANT_COMMANDS.INTRO)
+      );
+      expect(intro.replies.some((reply) => reply.text?.includes('已重新啟用教學協助期'))).toBe(
+        true
+      );
+
+      const next = await processMessage(
+        groupMsg(TEST_CUSTOMER, '我的官方 LINE 串接好了，要怎麼讓客人預約？')
+      );
+      expect(next.replies.find((reply) => reply.type === 'group')?.text).toBeTruthy();
+    });
+
     it('reactivates service period with status reply', async () => {
       await setupServicePeriod();
       const result = await processMessage(
