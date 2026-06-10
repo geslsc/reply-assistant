@@ -216,6 +216,49 @@ describe('LINE Webhook Tests', () => {
     expect(pushText).not.toHaveBeenCalled();
   });
 
+  it('handles group customer questions with replyMessage even when debounce is configured', async () => {
+    resetEnvCache();
+    loadEnv({
+      NODE_ENV: 'test',
+      USE_MEMORY_REPOS: true,
+      DEBOUNCE_SECONDS: 60,
+      LINE_CHANNEL_SECRET: SECRET,
+    });
+    await resetRepositories('memory');
+    await initKnowledgeBase();
+    await registerAdmin(TEST_ADMIN);
+    await registerInviteCode('TESTCODE', TEST_ADMIN);
+    await requestConsultantJoin(TEST_CONSULTANT, 'TESTCODE');
+    await approveConsultant(TEST_ADMIN, TEST_CONSULTANT);
+    await handleServiceIntroduction(TEST_GROUP, TEST_CONSULTANT);
+
+    const replyText = jest.fn().mockResolvedValue(undefined);
+    const pushText = jest.fn().mockResolvedValue('mock-push-id');
+    setLineMessageClient({ replyText, pushText });
+
+    const body = buildWebhookBody([
+      {
+        type: 'message',
+        source: { type: 'group', userId: TEST_CUSTOMER, groupId: TEST_GROUP },
+        message: { type: 'text', text: '怎麼登入後台' },
+        replyToken: 'reply-token-group-question',
+      },
+    ]);
+
+    await request(app)
+      .post('/webhook/line')
+      .set('Content-Type', 'application/json')
+      .set('x-line-signature', sign(body))
+      .send(body)
+      .expect(200);
+
+    expect(replyText).toHaveBeenCalledWith(
+      'reply-token-group-question',
+      expect.stringContaining('登入')
+    );
+    expect(pushText).not.toHaveBeenCalled();
+  });
+
   it('routes private image event to handlePrivateImageMessage in background', async () => {
     await registerAdmin(TEST_ADMIN);
     const handlerSpy = jest

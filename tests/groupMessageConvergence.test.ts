@@ -18,16 +18,12 @@ import {
 import { setLlmClient, LlmClient } from '../src/services/knowledgeCardDraftService';
 import {
   clearConvergenceTimersForTest,
-  processBufferByIdForTest,
   runPendingConvergenceTimersForTest,
   settleExpiredGroupBuffers,
   settleExpiredGroupBuffersGlobally,
 } from '../src/services/groupMessageConvergenceService';
 import { classifyCustomerQuestion } from '../src/services/groupSemanticRoutingService';
-import {
-  combineBufferMessages,
-  isNonSubstantiveCustomerMessage,
-} from '../src/services/groupMessageFilterService';
+import { isNonSubstantiveCustomerMessage } from '../src/services/groupMessageFilterService';
 import { isHighRiskCustomerMessage } from '../src/services/groupHighRiskService';
 import { validateKnowledgeCard } from '../src/services/knowledgeCardValidator';
 import { handleServiceIntroduction } from '../src/services/servicePeriodService';
@@ -97,28 +93,20 @@ describe('Group message convergence and semantic routing', () => {
     await seedPunchCard();
   });
 
-  it('merges three consecutive customer messages into one buffer question', async () => {
+  it('answers a clear customer message immediately instead of waiting for debounce', async () => {
     resetEnvCache();
     loadEnv({ USE_MEMORY_REPOS: true, DEBOUNCE_SECONDS: 60 });
     clearConvergenceTimersForTest();
 
-    await processMessage(groupMsg(TEST_CUSTOMER, '我不會使用計次券'));
-    await processMessage(groupMsg(TEST_CUSTOMER, '怎麼使用計次券'));
-    await processMessage(groupMsg(TEST_CUSTOMER, '怎麼設定計次券'));
+    const result = await processMessage(groupMsg(TEST_CUSTOMER, '怎麼使用計次券'));
 
     const buffer = await getRepos().groupMessageBuffers.findCollectingByGroupAndCustomer(
       TEST_GROUP,
       TEST_CUSTOMER
     );
-    expect(buffer).not.toBeNull();
-    expect(buffer!.messages).toHaveLength(3);
-    const merged = combineBufferMessages(buffer!.messages);
-    expect(merged).toContain('我不會使用計次券');
-    expect(merged).toContain('怎麼設定計次券');
-
-    const replies = await processBufferByIdForTest(buffer!.bufferId);
-    const groupReply = replies.find((r) => r.type === 'group');
+    const groupReply = result.replies.find((r) => r.type === 'group');
     expect(groupReply?.text).toContain('步驟一');
+    expect(buffer).toBeNull();
     expect((await getEventsByType(EventType.AI_ANSWER)).length).toBe(1);
   });
 
@@ -235,29 +223,29 @@ describe('Group message convergence and semantic routing', () => {
     expect(collecting).toBeNull();
   });
 
-  it('resets debounce timer when customer sends another message within window', async () => {
+  it('does not leave a pending debounce buffer after immediate handling', async () => {
     resetEnvCache();
     loadEnv({ USE_MEMORY_REPOS: true, DEBOUNCE_SECONDS: 60 });
     clearConvergenceTimersForTest();
 
-    await processMessage(groupMsg(TEST_CUSTOMER, '我不會使用計次券'));
+    const first = await processMessage(groupMsg(TEST_CUSTOMER, '我不會使用計次券'));
     const buffer1 = await getRepos().groupMessageBuffers.findCollectingByGroupAndCustomer(
       TEST_GROUP,
       TEST_CUSTOMER
     );
-    const firstUpdatedAt = buffer1!.updatedAt;
 
-    await new Promise((resolve) => setTimeout(resolve, 5));
-    await processMessage(groupMsg(TEST_CUSTOMER, '怎麼使用計次券'));
+    const second = await processMessage(groupMsg(TEST_CUSTOMER, '怎麼使用計次券'));
     const buffer2 = await getRepos().groupMessageBuffers.findCollectingByGroupAndCustomer(
       TEST_GROUP,
       TEST_CUSTOMER
     );
-    expect(buffer2!.messages).toHaveLength(2);
-    expect(buffer2!.updatedAt >= firstUpdatedAt).toBe(true);
+    expect(first.replies.find((r) => r.type === 'group')).toBeTruthy();
+    expect(second.replies.find((r) => r.type === 'group')).toBeTruthy();
+    expect(buffer1).toBeNull();
+    expect(buffer2).toBeNull();
   });
 
-  it('does not flush collecting buffer when consultant speaks mid-convergence', async () => {
+  it('does not create group replies when consultant speaks after immediate handling', async () => {
     resetEnvCache();
     loadEnv({ USE_MEMORY_REPOS: true, DEBOUNCE_SECONDS: 60 });
     clearConvergenceTimersForTest();
@@ -265,12 +253,7 @@ describe('Group message convergence and semantic routing', () => {
     await processMessage(groupMsg(TEST_CUSTOMER, '怎麼使用計次券'));
     const result = await processMessage(groupMsg(TEST_CONSULTANT, '我先看一下'));
     expect(result.replies.find((r) => r.type === 'group')).toBeUndefined();
-    const buffer = await getRepos().groupMessageBuffers.findCollectingByGroupAndCustomer(
-      TEST_GROUP,
-      TEST_CUSTOMER
-    );
-    expect(buffer).not.toBeNull();
-    expect(buffer!.messages).toHaveLength(1);
+    expect((await getActiveIssueThread(TEST_GROUP))?.consultantAnswered).toBe(true);
   });
 
   it('does not treat consultant onboarding intro as human takeover', async () => {
@@ -279,19 +262,12 @@ describe('Group message convergence and semantic routing', () => {
     clearConvergenceTimersForTest();
 
     await processMessage(groupMsg(TEST_CUSTOMER, '怎麼使用計次券'));
-    const buffer = await getRepos().groupMessageBuffers.findCollectingByGroupAndCustomer(
-      TEST_GROUP,
-      TEST_CUSTOMER
-    );
-    expect(buffer).not.toBeNull();
 
     const intro = await processMessage(
       groupMsg(TEST_CONSULTANT, '老師好，我是 Nina 導入教練')
     );
     expect(intro.replies.find((r) => r.type === 'group')).toBeUndefined();
-
-    const replies = await processBufferByIdForTest(buffer!.bufferId);
-    expect(replies.find((r) => r.type === 'group')?.text).toContain('步驟一');
+    expect((await getActiveIssueThread(TEST_GROUP))?.consultantAnswered).toBe(false);
   });
 
   it('does not treat bot intro command as human takeover', async () => {
@@ -300,17 +276,10 @@ describe('Group message convergence and semantic routing', () => {
     clearConvergenceTimersForTest();
 
     await processMessage(groupMsg(TEST_CUSTOMER, '怎麼使用計次券'));
-    const buffer = await getRepos().groupMessageBuffers.findCollectingByGroupAndCustomer(
-      TEST_GROUP,
-      TEST_CUSTOMER
-    );
-    expect(buffer).not.toBeNull();
 
     const intro = await processMessage(groupMsg(TEST_CONSULTANT, '自我介紹一下'));
     expect(intro.replies.find((r) => r.type === 'group')?.text).toContain('待命');
-
-    const replies = await processBufferByIdForTest(buffer!.bufferId);
-    expect(replies.find((r) => r.type === 'group')?.text).toContain('步驟一');
+    expect((await getActiveIssueThread(TEST_GROUP))?.consultantAnswered).toBe(false);
   });
 
   it('still treats substantive consultant answers as human takeover', async () => {
@@ -319,16 +288,9 @@ describe('Group message convergence and semantic routing', () => {
     clearConvergenceTimersForTest();
 
     await processMessage(groupMsg(TEST_CUSTOMER, '怎麼使用計次券'));
-    const buffer = await getRepos().groupMessageBuffers.findCollectingByGroupAndCustomer(
-      TEST_GROUP,
-      TEST_CUSTOMER
-    );
-    expect(buffer).not.toBeNull();
 
     await processMessage(groupMsg(TEST_CONSULTANT, '請到票券管理新增計次券'));
 
-    const replies = await processBufferByIdForTest(buffer!.bufferId);
-    expect(replies).toHaveLength(0);
     expect((await getActiveIssueThread(TEST_GROUP))?.consultantAnswered).toBe(true);
   });
 
@@ -346,13 +308,7 @@ describe('Group message convergence and semantic routing', () => {
     expect(await getActiveIssueThread(TEST_GROUP)).toBeUndefined();
 
     const next = await processMessage(groupMsg(TEST_CUSTOMER, '怎麼登入後台'));
-    const nextBuffer = await getRepos().groupMessageBuffers.findCollectingByGroupAndCustomer(
-      TEST_GROUP,
-      TEST_CUSTOMER
-    );
-    expect(next.replies).toHaveLength(0);
-    expect(nextBuffer).not.toBeNull();
-    expect(nextBuffer!.messages[0].text).toBe('怎麼登入後台');
+    expect(next.replies.find((r) => r.type === 'group')?.text).toContain('登入');
   });
 
   it('resumes assistant after consultant takeover when consultant says 小助手再麻煩了', async () => {
@@ -393,11 +349,18 @@ describe('Group message convergence and semantic routing', () => {
     loadEnv({ USE_MEMORY_REPOS: true, DEBOUNCE_SECONDS: 60 });
     clearConvergenceTimersForTest();
 
-    await processMessage(groupMsg(TEST_CUSTOMER, '怎麼登入後台'));
-    const buffer = await getRepos().groupMessageBuffers.findCollectingByGroupAndCustomer(
-      TEST_GROUP,
-      TEST_CUSTOMER
-    );
+    const thread = await getRepos().threads.create(TEST_GROUP, '怎麼登入後台');
+    const buffer = await getRepos().groupMessageBuffers.create({
+      groupId: TEST_GROUP,
+      customerUserId: TEST_CUSTOMER,
+      issueThreadId: thread.issueThreadId,
+      message: {
+        message_id: 'legacy-message-1',
+        text: '怎麼登入後台',
+        timestamp: new Date().toISOString(),
+        sequence: 1,
+      },
+    });
     expect(buffer).not.toBeNull();
 
     clearConvergenceTimersForTest();
@@ -416,11 +379,18 @@ describe('Group message convergence and semantic routing', () => {
     loadEnv({ USE_MEMORY_REPOS: true, DEBOUNCE_SECONDS: 60 });
     clearConvergenceTimersForTest();
 
-    await processMessage(groupMsg(TEST_CUSTOMER, '怎麼登入後台'));
-    const buffer = await getRepos().groupMessageBuffers.findCollectingByGroupAndCustomer(
-      TEST_GROUP,
-      TEST_CUSTOMER
-    );
+    const thread = await getRepos().threads.create(TEST_GROUP, '怎麼登入後台');
+    const buffer = await getRepos().groupMessageBuffers.create({
+      groupId: TEST_GROUP,
+      customerUserId: TEST_CUSTOMER,
+      issueThreadId: thread.issueThreadId,
+      message: {
+        message_id: 'legacy-message-2',
+        text: '怎麼登入後台',
+        timestamp: new Date().toISOString(),
+        sequence: 1,
+      },
+    });
     expect(buffer).not.toBeNull();
 
     clearConvergenceTimersForTest();

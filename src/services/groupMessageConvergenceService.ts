@@ -240,19 +240,8 @@ export async function handleIncomingCustomerGroupMessage(params: {
 
   const { buffer } = await appendToBuffer(params);
 
-  if (isHighRiskCustomerMessage(params.text)) {
-    cancelDebounceTimer(buffer.bufferId);
-    return processBuffer(buffer);
-  }
-
-  const ms = getDebounceMs();
-  if (ms <= 0) {
-    cancelDebounceTimer(buffer.bufferId);
-    return processBuffer(buffer);
-  }
-
-  scheduleBufferProcessing(buffer);
-  return [];
+  cancelDebounceTimer(buffer.bufferId);
+  return processBuffer(buffer);
 }
 
 export async function settleExpiredGroupBuffers(
