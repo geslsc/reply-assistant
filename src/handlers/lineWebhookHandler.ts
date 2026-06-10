@@ -113,6 +113,24 @@ export interface IncomingMessage {
 const CONSULTANT_JOIN_PATTERN = /^加入顧問\s+(\S+)$/;
 const APPROVE_CONSULTANT_PATTERN = /^核准顧問\s+(\S+)$/;
 
+function isLikelyPrivateCommand(text: string): boolean {
+  return /^(查詢|列出|查看|群組|服務期|小助手|設定|解除|新增|修改|確認|搜尋|找|匯出|暫停|恢復|有沒有)/u.test(
+    text.trim()
+  );
+}
+
+function buildUnknownPrivateCommandReply(userId: string, isAdmin: boolean): BotReply {
+  const lines = [
+    '我目前沒有判讀到可執行的指令。',
+    '',
+    '可先試：',
+    '- 使用說明',
+    isAdmin ? '- 群組清單' : '- 我的服務群組',
+    '- 查詢服務期 [群組名稱或 G-xx]',
+  ];
+  return { type: 'push', userId, text: lines.join('\n') };
+}
+
 function isClosingSignal(text: string): boolean {
   const trimmed = text.trim();
   return CLOSING_SIGNALS.some((s) => trimmed === s);
@@ -409,7 +427,11 @@ async function handlePrivateMessage(message: IncomingMessage): Promise<BotReply[
         text: SIMPLIFIED_PRIVATE_FALLBACK_HINT,
       });
     }
-    if (await isActiveAdmin(message.userId)) {
+    const isAdmin = await isActiveAdmin(message.userId);
+    if (replies.length === 0 && isLikelyPrivateCommand(text)) {
+      replies.push(buildUnknownPrivateCommandReply(message.userId, isAdmin));
+    }
+    if (isAdmin) {
       await appendBackupReminderIfNeeded(message.userId, replies);
     }
     return replies.length > 0 ? replies : [];

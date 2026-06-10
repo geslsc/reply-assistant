@@ -331,6 +331,17 @@ describe('group syntax and private code UX 2026-06-10', () => {
   });
 
   describe('private code navigation', () => {
+    it('admin group list accepts query wording from usage guide testing', async () => {
+      await handleBotJoinGroup(TEST_GROUP);
+      const result = await processMessage(privateMsg(TEST_ADMIN, '查詢群組列表'));
+      expect(result.replies[0].text).toContain('【群組清單】');
+    });
+
+    it('consultant group list alias is rejected instead of silent', async () => {
+      const result = await processMessage(privateMsg(TEST_CONSULTANT, '查詢群組列表'));
+      expect(result.replies[0].text).toContain('僅 active admin');
+    });
+
     it('shows Q code action list', async () => {
       const thread = await createIssueThread(TEST_GROUP, '問題');
       await createPendingHandoff({
@@ -369,6 +380,24 @@ describe('group syntax and private code UX 2026-06-10', () => {
         '查詢服務期 大寶寶測試群'
       );
       expect(replies?.[0].text).toContain('【群組服務期】');
+    });
+
+    it('service period query supports partial group name used in LINE', async () => {
+      await getRepos().groups.update(TEST_GROUP, { groupName: '小助手測試 (3)' });
+      await handleBotJoinGroup(TEST_GROUP);
+      await handleServiceIntroduction(TEST_GROUP, TEST_ADMIN);
+      const replies = await handlePrivateCodeNavigation(
+        TEST_ADMIN,
+        '查詢服務期 小助手測試'
+      );
+      expect(replies?.[0].text).toContain('【群組服務期】');
+      expect(replies?.[0].text).toContain('小助手測試');
+    });
+
+    it('unknown private command-like text returns guidance instead of silence', async () => {
+      const result = await processMessage(privateMsg(TEST_ADMIN, '設定神秘功能'));
+      expect(result.replies.length).toBeGreaterThan(0);
+      expect(result.replies[0].text).toContain('使用說明');
     });
   });
 

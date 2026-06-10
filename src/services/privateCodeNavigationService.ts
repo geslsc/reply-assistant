@@ -15,6 +15,7 @@ import { getCardById } from './knowledgeBaseService';
 import { dbRecordToKnowledgeCard } from '../schemas/knowledgeCardDbSchema';
 import { formatServicePeriodStatus, parseServicePeriodQuery } from './servicePeriodService';
 import { getGroupDisplayName } from './lineGroupSummaryService';
+import { formatAssignmentGroupLabel } from './groupConsultantAssignmentService';
 
 const Q_CODE_PATTERN = /^Q-\d{8}-\d{4}-[A-Z0-9]{2}$/u;
 const K_CODE_PATTERN = /^K-\d{8}-[A-Z0-9]{2,}$/u;
@@ -143,6 +144,65 @@ export async function handleGroupNameLookup(userId: string, groupName: string): 
   ];
 }
 
+async function resolveGroupForPrivateQuery(
+  query: string
+): Promise<
+  | { ok: true; groupId: string }
+  | { ok: false; reason: 'not_found' }
+  | { ok: false; reason: 'ambiguous'; candidates: string[] }
+> {
+  const trimmed = query.trim();
+  const assignments = await getRepos().groupConsultantAssignments.listAll();
+  const byCode = assignments.find((assignment) => assignment.groupCode === trimmed);
+  if (byCode) {
+    return { ok: true, groupId: byCode.groupId };
+  }
+
+  const groups = await getRepos().groups.findAll();
+  const labels = new Map<string, string>();
+  for (const group of groups) {
+    if (group.groupName) {
+      labels.set(group.groupId, group.groupName);
+    }
+  }
+  for (const assignment of assignments) {
+    if (assignment.groupName) {
+      labels.set(assignment.groupId, formatAssignmentGroupLabel(assignment));
+    }
+  }
+
+  const exactIds = [...labels.entries()]
+    .filter(([, label]) => label === trimmed)
+    .map(([groupId]) => groupId);
+  if (exactIds.length === 1) {
+    return { ok: true, groupId: exactIds[0] };
+  }
+  if (exactIds.length > 1) {
+    return {
+      ok: false,
+      reason: 'ambiguous',
+      candidates: exactIds.map((groupId) => `${labels.get(groupId)}（${groupId}）`),
+    };
+  }
+
+  const partialIds = [...labels.entries()]
+    .filter(([, label]) => label.includes(trimmed) || trimmed.includes(label))
+    .map(([groupId]) => groupId);
+  const uniquePartialIds = [...new Set(partialIds)];
+  if (uniquePartialIds.length === 1) {
+    return { ok: true, groupId: uniquePartialIds[0] };
+  }
+  if (uniquePartialIds.length > 1) {
+    return {
+      ok: false,
+      reason: 'ambiguous',
+      candidates: uniquePartialIds.map((groupId) => `${labels.get(groupId)}（${groupId}）`),
+    };
+  }
+
+  return { ok: false, reason: 'not_found' };
+}
+
 export async function handlePrivateCodeNavigation(
   userId: string,
   text: string
@@ -163,12 +223,22 @@ export async function handlePrivateCodeNavigation(
       ];
     }
     if (serviceQuery.groupName) {
-      const groups = await getRepos().groups.findAll();
-      const match = groups.find((g) => g.groupName === serviceQuery.groupName);
-      if (!match) {
+      const match = await resolveGroupForPrivateQuery(serviceQuery.groupName);
+      if (match.ok) {
+        return [{ type: 'push', userId, text: await formatServicePeriodStatus(match.groupId) }];
+      }
+      if (match.reason === 'ambiguous') {
+        return [
+          {
+            type: 'push',
+            userId,
+            text: `找到多個相近群組，請改用 group_code 查詢：\n${match.candidates.join('\n')}`,
+          },
+        ];
+      }
+      if (!match.ok) {
         return [{ type: 'push', userId, text: `找不到群組「${serviceQuery.groupName}」。` }];
       }
-      return [{ type: 'push', userId, text: await formatServicePeriodStatus(match.groupId) }];
     }
     return [
       {

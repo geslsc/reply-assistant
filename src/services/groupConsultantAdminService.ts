@@ -18,6 +18,18 @@ const GROUP_CODE_STATUS_PATTERN = /^群組\s+(G-\d+)\s+狀態$/u;
 const GROUP_NAME_STATUS_PATTERN = /^(.+)\s+狀態$/u;
 
 export const GROUP_LIST_PHRASE = '群組清單';
+const GROUP_LIST_PHRASES = new Set([
+  GROUP_LIST_PHRASE,
+  '查詢群組清單',
+  '查詢群組列表',
+  '群組列表',
+  '列出群組',
+  '列出群組列表',
+]);
+
+function isGroupListPhrase(text: string): boolean {
+  return GROUP_LIST_PHRASES.has(text.trim());
+}
 
 function formatTimestamp(value: string | null): string {
   if (!value) {
@@ -66,7 +78,7 @@ export async function handleGroupAdminCommand(
 
   const trimmed = text.trim();
 
-  if (trimmed === GROUP_LIST_PHRASE) {
+  if (isGroupListPhrase(trimmed)) {
     return listAllGroups(adminUserId);
   }
 
@@ -304,7 +316,7 @@ async function unassignGroup(adminUserId: string, groupCode: string): Promise<Bo
 }
 
 export async function rejectConsultantGroupList(userId: string, text: string): Promise<BotReply[] | null> {
-  if (text.trim() !== GROUP_LIST_PHRASE) {
+  if (!isGroupListPhrase(text)) {
     return null;
   }
   if (await isActiveAdmin(userId)) {
