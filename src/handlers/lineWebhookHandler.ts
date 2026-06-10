@@ -96,6 +96,7 @@ import {
 import { handleDisabledConsultantGroupCommand } from '../services/disabledConsultantGroupService';
 import { maybeSendServicePeriodEndedMessage } from '../services/servicePeriodEndMessageService';
 import { refreshGroupNameIfNeeded } from '../services/lineGroupSummaryService';
+import { buildPrivateCommandKeywordHint } from '../services/privateCommandHintService';
 
 export interface IncomingMessage {
   userId: string;
@@ -112,12 +113,6 @@ export interface IncomingMessage {
 
 const CONSULTANT_JOIN_PATTERN = /^加入顧問\s+(\S+)$/;
 const APPROVE_CONSULTANT_PATTERN = /^核准顧問\s+(\S+)$/;
-
-function isLikelyPrivateCommand(text: string): boolean {
-  return /^(查詢|列出|查看|群組|服務期|小助手|設定|解除|新增|修改|確認|搜尋|找|匯出|暫停|恢復|有沒有)/u.test(
-    text.trim()
-  );
-}
 
 function buildUnknownPrivateCommandReply(userId: string, isAdmin: boolean): BotReply {
   const lines = [
@@ -420,16 +415,21 @@ async function handlePrivateMessage(message: IncomingMessage): Promise<BotReply[
       return replies;
     }
 
-    if (consumePrivateFallbackHint(message.userId)) {
+    const isAdmin = await isActiveAdmin(message.userId);
+    const keywordHint = buildPrivateCommandKeywordHint(message.userId, text, isAdmin);
+    if (keywordHint) {
+      replies.push(keywordHint);
+    } else if (
+      replies.length === 0 &&
+      /^(查詢|列出|查看|小助手|設定|解除|新增|修改|確認|搜尋|找|有沒有)/u.test(text)
+    ) {
+      replies.push(buildUnknownPrivateCommandReply(message.userId, isAdmin));
+    } else if (consumePrivateFallbackHint(message.userId)) {
       replies.push({
         type: 'push',
         userId: message.userId,
         text: SIMPLIFIED_PRIVATE_FALLBACK_HINT,
       });
-    }
-    const isAdmin = await isActiveAdmin(message.userId);
-    if (replies.length === 0 && isLikelyPrivateCommand(text)) {
-      replies.push(buildUnknownPrivateCommandReply(message.userId, isAdmin));
     }
     if (isAdmin) {
       await appendBackupReminderIfNeeded(message.userId, replies);

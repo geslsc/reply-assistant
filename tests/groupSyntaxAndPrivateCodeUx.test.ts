@@ -382,6 +382,11 @@ describe('group syntax and private code UX 2026-06-10', () => {
       expect(replies?.[0].text).toContain('【群組服務期】');
     });
 
+    it('usage guide service period phrase asks for group instead of silence', async () => {
+      const result = await processMessage(privateMsg(TEST_ADMIN, '查詢群組服務期'));
+      expect(result.replies[0].text).toContain('請指定群組名稱');
+    });
+
     it('service period query supports partial group name used in LINE', async () => {
       await getRepos().groups.update(TEST_GROUP, { groupName: '小助手測試 (3)' });
       await handleBotJoinGroup(TEST_GROUP);
@@ -398,6 +403,26 @@ describe('group syntax and private code UX 2026-06-10', () => {
       const result = await processMessage(privateMsg(TEST_ADMIN, '設定神秘功能'));
       expect(result.replies.length).toBeGreaterThan(0);
       expect(result.replies[0].text).toContain('使用說明');
+    });
+
+    it('guide-listed pending handoff phrase returns a result without full usage guide', async () => {
+      const result = await processMessage(privateMsg(TEST_CONSULTANT, '查看待處理問題'));
+      expect(result.replies[0].text).toContain('目前沒有待處理問題');
+      expect(result.replies[0].text).not.toContain('【小助手使用說明');
+    });
+
+    it('knowledge-card keyword miss gives compact actionable hints', async () => {
+      const result = await processMessage(privateMsg(TEST_CONSULTANT, '我想修改知識卡'));
+      expect(result.replies[0].text).toContain('操作知識卡');
+      expect(result.replies[0].text).toContain('修改知識卡 [card_id 或編號]');
+      expect(result.replies[0].text).not.toContain('【小助手使用說明');
+    });
+
+    it('group keyword miss gives compact group hints', async () => {
+      const result = await processMessage(privateMsg(TEST_CONSULTANT, '我要查群組'));
+      expect(result.replies[0].text).toContain('查群組或服務期');
+      expect(result.replies[0].text).toContain('我的服務群組');
+      expect(result.replies[0].text).not.toContain('【小助手使用說明');
     });
   });
 

@@ -269,7 +269,14 @@ export async function handleConsultantNaturalLanguage(
         {
           type: 'push',
           userId: ctx.userId,
-          text: '知識卡草稿整理請私訊「幫我整理知識卡」開始多步驟流程。',
+          text: [
+            '我有看到您在操作知識卡，可以用：',
+            '- 幫我整理知識卡',
+            '- 查詢知識卡 [關鍵字或 card_id]',
+            '- 搜尋 [關鍵字]',
+            '- 修改知識卡 [card_id 或編號]',
+            '輸入「使用說明」可查看完整指令。',
+          ].join('\n'),
         },
       ];
     }
