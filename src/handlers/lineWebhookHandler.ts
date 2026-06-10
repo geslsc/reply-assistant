@@ -103,6 +103,7 @@ export interface IncomingMessage {
   text: string;
   isGroup: boolean;
   isBotMentioned?: boolean;
+  messageId?: string;
   replyToken?: string;
   quotedMessageId?: string;
   timestamp?: string;
@@ -562,7 +563,7 @@ export async function processMessage(message: IncomingMessage): Promise<ProcessR
     ...(await (async () => {
       await updateLastCustomerMessageAt(groupId);
       return handleCustomerQuestion(groupId, message.userId, text, {
-        messageId: message.replyToken,
+        messageId: message.messageId ?? message.replyToken,
         timestamp: message.timestamp,
       });
     })())

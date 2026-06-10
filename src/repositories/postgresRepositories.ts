@@ -31,6 +31,7 @@ import { createPostgresKnowledgeCardRepository } from './postgresKnowledgeCardRe
 import { createPostgresConsultantApplicationRepository } from './postgresConsultantApplicationRepository';
 import { createPostgresGroupMessageBufferRepository } from './postgresGroupMessageBufferRepository';
 import { createPostgresGroupConsultantAssignmentRepository } from './postgresGroupConsultantAssignmentRepository';
+import { createPostgresLineEventDedupRepository } from './postgresLineEventDedupRepository';
 import {
   mapConsultantRow,
   mapGroupRow,
@@ -513,5 +514,6 @@ export function createPostgresRepositories(pool: Pool = getPool()): Repositories
     groupMessageBuffers: createPostgresGroupMessageBufferRepository(pool),
     consultantApplications: createPostgresConsultantApplicationRepository(pool),
     groupConsultantAssignments: createPostgresGroupConsultantAssignmentRepository(pool),
+    lineEventDedup: createPostgresLineEventDedupRepository(pool),
   };
 }

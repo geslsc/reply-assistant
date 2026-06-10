@@ -56,6 +56,7 @@ export async function runMigrations(pool?: Pool): Promise<void> {
 export async function dropAllTables(pool?: Pool): Promise<void> {
   const p = pool ?? getPool();
   await p.query(`
+    DROP TABLE IF EXISTS processed_line_events CASCADE;
     DROP TABLE IF EXISTS dm_sessions CASCADE;
     DROP TABLE IF EXISTS group_message_buffers CASCADE;
     DROP TABLE IF EXISTS pending_knowledge_reviews CASCADE;

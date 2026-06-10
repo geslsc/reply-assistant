@@ -11,6 +11,7 @@ import {
   classifyConsultantIntent,
   isConsultantPrivateAiIntent,
 } from '../services/consultantIntentClassifier';
+import { getRepos } from '../repositories';
 
 interface LineWebhookEvent {
   type: string;
@@ -27,6 +28,10 @@ interface LineWebhookEvent {
   };
   replyToken?: string;
   timestamp?: number;
+  webhookEventId?: string;
+  deliveryContext?: {
+    isRedelivery?: boolean;
+  };
 }
 
 interface LineWebhookBody {
@@ -113,11 +118,39 @@ export function mapLineEvent(event: LineWebhookEvent): MappedLineEvent {
     text: event.message.text ?? '',
     isGroup: event.source.type === 'group',
     isBotMentioned: false,
+    messageId: event.message.id,
     replyToken: event.replyToken,
     quotedMessageId: event.message.quotedMessageId,
     timestamp: event.timestamp ? String(event.timestamp) : undefined,
     sourceType: event.source.type === 'group' ? 'group' : 'user',
   };
+}
+
+export function getLineWebhookDedupKey(event: LineWebhookEvent): string | null {
+  if (event.webhookEventId) {
+    return `event:${event.webhookEventId}`;
+  }
+  if (event.message?.id) {
+    return `message:${event.message.id}`;
+  }
+  return null;
+}
+
+async function claimLineWebhookEvent(event: LineWebhookEvent): Promise<boolean> {
+  const key = getLineWebhookDedupKey(event);
+  if (!key) {
+    return true;
+  }
+  const claimed = await getRepos().lineEventDedup.claim(key, new Date().toISOString());
+  if (!claimed) {
+    logger.info('Duplicate LINE webhook event skipped', {
+      dedupKey: key,
+      isRedelivery: event.deliveryContext?.isRedelivery ?? false,
+      eventType: event.type,
+      messageType: event.message?.type,
+    });
+  }
+  return claimed;
 }
 
 function shouldHandleInBackground(message: IncomingMessage): boolean {
@@ -166,6 +199,10 @@ export async function handleLineWebhook(req: Request, res: Response): Promise<vo
 
   try {
     for (const event of body.events ?? []) {
+      if (!(await claimLineWebhookEvent(event))) {
+        continue;
+      }
+
       const leave = mapLeaveEvent(event);
       if (leave) {
         void handleBotLeaveGroup(leave.groupId)

@@ -29,6 +29,7 @@ import { createMemoryDmSessionRepository } from './memoryDmSessionRepository';
 import { createMemoryConsultantApplicationRepository } from './memoryConsultantApplicationRepository';
 import { createMemoryGroupConsultantAssignmentRepository } from './memoryGroupConsultantAssignmentRepository';
 import { createMemoryGroupMessageBufferRepository } from './memoryGroupMessageBufferRepository';
+import { createMemoryLineEventDedupRepository } from './memoryLineEventDedupRepository';
 
 const VALID_EVENT_TYPES = new Set(Object.values(EventType));
 const VALID_ACTORS = new Set(Object.values(Actor));
@@ -387,5 +388,6 @@ export function createMemoryRepositories(): Repositories {
     groupMessageBuffers: createMemoryGroupMessageBufferRepository(),
     consultantApplications: createMemoryConsultantApplicationRepository(),
     groupConsultantAssignments: createMemoryGroupConsultantAssignmentRepository(),
+    lineEventDedup: createMemoryLineEventDedupRepository(),
   };
 }

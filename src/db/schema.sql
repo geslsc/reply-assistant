@@ -104,6 +104,14 @@ CREATE INDEX IF NOT EXISTS idx_event_logs_group_id ON event_logs(group_id);
 CREATE INDEX IF NOT EXISTS idx_event_logs_event_type ON event_logs(event_type);
 CREATE INDEX IF NOT EXISTS idx_event_logs_timestamp ON event_logs(timestamp);
 
+CREATE TABLE IF NOT EXISTS processed_line_events (
+  event_id TEXT PRIMARY KEY,
+  processed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_processed_line_events_processed_at
+  ON processed_line_events(processed_at);
+
 CREATE TABLE IF NOT EXISTS consultants (
   line_user_id TEXT PRIMARY KEY,
   role TEXT NOT NULL,

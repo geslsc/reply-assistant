@@ -16,9 +16,24 @@ import { handleServiceIntroduction } from '../src/services/servicePeriodService'
 import { initKnowledgeBase } from '../src/services/knowledgeBaseService';
 import { processMessage } from '../src/handlers/lineWebhookHandler';
 import * as dmSessionImageService from '../src/services/dmSessionImageService';
+import { seedActiveSessionForTest } from '../src/services/dmSessionService';
+import { KnowledgeCard } from '../src/schemas/knowledgeCardSchema';
+import { RiskLevel } from '../src/types';
 import { TEST_ADMIN, TEST_CONSULTANT, TEST_CUSTOMER, TEST_GROUP } from './helpers/testSetup';
 
 const SECRET = 'test-channel-secret';
+
+const sampleCard: KnowledgeCard = {
+  card_id: 'webhook-dedup-card',
+  title: '快速結帳功能常見問題',
+  patterns: ['快速結帳'],
+  risk_level: RiskLevel.LOW,
+  can_public_reply: true,
+  standard_answer: '請依照快速結帳流程操作。',
+  not_applicable: [],
+  escalate_to_consultant: [],
+  status: '可用',
+};
 
 function sign(body: string): string {
   return crypto.createHmac('sha256', SECRET).update(body).digest('base64');
@@ -249,5 +264,48 @@ describe('LINE Webhook Tests', () => {
     expect(handlerSpy).not.toHaveBeenCalled();
     expect(repliedText).toBe('');
     handlerSpy.mockRestore();
+  });
+
+  it('deduplicates repeated LINE message events before they can double-cancel a draft', async () => {
+    await registerAdmin(TEST_ADMIN);
+    await registerInviteCode('TESTCODE', TEST_ADMIN);
+    await requestConsultantJoin(TEST_CONSULTANT, 'TESTCODE');
+    await approveConsultant(TEST_ADMIN, TEST_CONSULTANT);
+    await seedActiveSessionForTest({ userId: TEST_CONSULTANT, card: sampleCard });
+
+    const pushedTexts: string[] = [];
+    setLineMessageClient({
+      async replyText() {
+        throw new Error('private cancel should use pushMessage');
+      },
+      async pushText(_userId, text) {
+        pushedTexts.push(text);
+        return `mock-push-${pushedTexts.length}`;
+      },
+    });
+
+    const cancelEvent = {
+      type: 'message',
+      source: { type: 'user', userId: TEST_CONSULTANT },
+      message: { type: 'text', id: 'cancel-msg-001', text: '取消' },
+      replyToken: 'reply-token-cancel-1',
+    };
+    const body = buildWebhookBody([
+      cancelEvent,
+      {
+        ...cancelEvent,
+        replyToken: 'reply-token-cancel-2',
+        deliveryContext: { isRedelivery: true },
+      },
+    ]);
+
+    await request(app)
+      .post('/webhook/line')
+      .set('Content-Type', 'application/json')
+      .set('x-line-signature', sign(body))
+      .send(body)
+      .expect(200);
+
+    expect(pushedTexts).toEqual(['已取消目前知識卡整理流程，草稿資料已保留。']);
   });
 });

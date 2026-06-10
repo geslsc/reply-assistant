@@ -98,6 +98,11 @@ export interface KnowledgeOverrideRepository {
   clear(): Promise<void>;
 }
 
+export interface LineEventDedupRepository {
+  claim(eventId: string, processedAt: string): Promise<boolean>;
+  clear(): Promise<void>;
+}
+
 export interface Repositories {
   groups: GroupRepository;
   threads: IssueThreadRepository;
@@ -111,4 +116,5 @@ export interface Repositories {
   groupMessageBuffers: import('./groupMessageBufferTypes').GroupMessageBufferRepository;
   consultantApplications: ConsultantApplicationRepository;
   groupConsultantAssignments: import('./groupConsultantAssignmentTypes').GroupConsultantAssignmentRepository;
+  lineEventDedup: LineEventDedupRepository;
 }
