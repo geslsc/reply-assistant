@@ -403,6 +403,8 @@ function createConsultantRepository(pool: Pool): ConsultantRepository {
           approved_at = EXCLUDED.approved_at,
           disabled_by = NULL,
           disabled_at = NULL,
+          push_failure_count = 0,
+          last_push_failed_at = NULL,
           updated_at = NOW()`,
         [
           params.userId,
@@ -447,6 +449,26 @@ function createConsultantRepository(pool: Pool): ConsultantRepository {
         [ConsultantStatus.ACTIVE, ConsultantRole.ADMIN]
       );
       return result.rows.map(mapConsultantRow);
+    },
+    async recordPushSuccess(userId, succeededAt) {
+      await pool.query(
+        `UPDATE consultants
+         SET push_failure_count = 0,
+             last_push_succeeded_at = $2,
+             updated_at = NOW()
+         WHERE line_user_id = $1`,
+        [userId, succeededAt]
+      );
+    },
+    async recordPushFailure(userId, failedAt) {
+      await pool.query(
+        `UPDATE consultants
+         SET push_failure_count = push_failure_count + 1,
+             last_push_failed_at = $2,
+             updated_at = NOW()
+         WHERE line_user_id = $1`,
+        [userId, failedAt]
+      );
     },
     async setLastKnowledgeExportAt(userId, exportedAt) {
       await pool.query(

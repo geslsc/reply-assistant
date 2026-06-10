@@ -86,6 +86,8 @@ export interface ConsultantRepository {
   findActive(): Promise<ConsultantRecord[]>;
   findPending(): Promise<ConsultantRecord[]>;
   findActiveAdmins(): Promise<ConsultantRecord[]>;
+  recordPushSuccess(userId: string, succeededAt: string): Promise<void>;
+  recordPushFailure(userId: string, failedAt: string): Promise<void>;
   setLastKnowledgeExportAt(userId: string, exportedAt: string): Promise<void>;
   getLastKnowledgeExportAt(userId: string): Promise<string | null>;
   clear(): Promise<void>;

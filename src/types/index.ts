@@ -111,6 +111,9 @@ export interface ConsultantRecord {
   disabledBy: string | null;
   disabledAt: string | null;
   lastKnowledgeExportAt?: string | null;
+  pushFailureCount?: number;
+  lastPushFailedAt?: string | null;
+  lastPushSucceededAt?: string | null;
 }
 
 /** @deprecated 請改用 KnowledgeCard；保留別名供既有程式過渡 */
@@ -141,6 +144,18 @@ export interface BotReply {
   text: string;
   /** 知識卡待審推送：供記錄 bot messageId → reviewId */
   trackReviewId?: string;
+  /** pushMessage 失敗時通知備援收件人，避免 handoff 安靜遺失 */
+  deliveryFailureFallbackUserIds?: string[];
+  deliveryFailureText?: string;
+  /** handoff 指派私訊投遞健康追蹤：成功會清失敗，失敗會讓之後路由避開不可達顧問 */
+  trackDeliveryHealthUserId?: string;
+  /** handoff 私訊失敗時，把待處理問題轉交給可接手的人 */
+  deliveryFailureHandoffTransfer?: {
+    groupId: string;
+    fromUserId: string;
+    toUserId: string;
+    transferText: string;
+  };
 }
 
 export interface ProcessResult {

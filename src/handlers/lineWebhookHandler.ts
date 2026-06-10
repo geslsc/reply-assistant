@@ -2,6 +2,7 @@ import {
   Actor,
   BotReply,
   CLOSING_SIGNALS,
+  ConsultantStatus,
   ProcessResult,
   REOPEN_SIGNALS,
   ThreadState,
@@ -292,6 +293,11 @@ async function handlePrivateMessage(message: IncomingMessage): Promise<BotReply[
   const text = message.text.trim();
 
   logger.info('LINE private message received', { userId: message.userId, text });
+
+  const consultantRecord = await getRepos().consultants.findById(message.userId);
+  if (consultantRecord?.status === ConsultantStatus.ACTIVE) {
+    await getRepos().consultants.recordPushSuccess(message.userId, new Date().toISOString());
+  }
 
   if (text === APPLY_CONSULTANT_PHRASE) {
     return handleApplyConsultant({ userId: message.userId });

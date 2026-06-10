@@ -292,6 +292,9 @@ export function createMemoryRepositories(): Repositories {
         approvedAt: params.approvedAt,
         disabledBy: null,
         disabledAt: null,
+        pushFailureCount: existing?.pushFailureCount ?? 0,
+        lastPushFailedAt: existing?.lastPushFailedAt ?? null,
+        lastPushSucceededAt: existing?.lastPushSucceededAt ?? null,
       };
       consultants.set(params.userId, record);
       return { ...record };
@@ -323,6 +326,22 @@ export function createMemoryRepositories(): Repositories {
       return Array.from(consultants.values()).filter(
         (c) => c.status === ConsultantStatus.ACTIVE && c.role === ConsultantRole.ADMIN
       );
+    },
+    async recordPushSuccess(userId, succeededAt) {
+      const record = consultants.get(userId);
+      if (record) {
+        record.pushFailureCount = 0;
+        record.lastPushSucceededAt = succeededAt;
+        record.updatedAt = succeededAt;
+      }
+    },
+    async recordPushFailure(userId, failedAt) {
+      const record = consultants.get(userId);
+      if (record) {
+        record.pushFailureCount = (record.pushFailureCount ?? 0) + 1;
+        record.lastPushFailedAt = failedAt;
+        record.updatedAt = failedAt;
+      }
     },
     async setLastKnowledgeExportAt(userId, exportedAt) {
       consultantExportAt.set(userId, exportedAt);

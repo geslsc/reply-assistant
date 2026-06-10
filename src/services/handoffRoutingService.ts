@@ -2,7 +2,7 @@ import { getRepos } from '../repositories';
 import { logConsultantManagementEvent } from './consultantEventLogService';
 import {
   getFallbackAdminUserId,
-  isActiveAssignee,
+  isActiveReachableAssignee,
 } from './groupConsultantAssignmentService';
 
 export type HandoffTargetRole = 'primary' | 'secondary' | 'fallback_admin';
@@ -18,12 +18,43 @@ export interface HandoffTarget {
   reason: HandoffTargetReason;
 }
 
+export async function resolveHandoffFailureTarget(
+  groupId: string,
+  failedUserId: string
+): Promise<HandoffTarget | null> {
+  const assignment = await getRepos().groupConsultantAssignments.findByGroupId(groupId);
+
+  if (
+    assignment?.secondaryConsultantUserId &&
+    assignment.secondaryConsultantUserId !== failedUserId &&
+    (await isActiveReachableAssignee(assignment.secondaryConsultantUserId))
+  ) {
+    return {
+      userId: assignment.secondaryConsultantUserId,
+      targetRole: 'secondary',
+      reason: 'primary_inactive_secondary_active',
+    };
+  }
+
+  const admins = await getRepos().consultants.findActiveAdmins();
+  const fallbackAdmin = admins.find((admin) => admin.userId !== failedUserId);
+  if (!fallbackAdmin) {
+    return null;
+  }
+
+  return {
+    userId: fallbackAdmin.userId,
+    targetRole: 'fallback_admin',
+    reason: 'no_active_assignee',
+  };
+}
+
 /** handoff 路由單一入口：主負責 → 副手 → fallback admin */
 export async function resolveHandoffTarget(groupId: string): Promise<HandoffTarget | null> {
   const assignment = await getRepos().groupConsultantAssignments.findByGroupId(groupId);
 
   if (assignment?.primaryConsultantUserId) {
-    if (await isActiveAssignee(assignment.primaryConsultantUserId)) {
+    if (await isActiveReachableAssignee(assignment.primaryConsultantUserId)) {
       return {
         userId: assignment.primaryConsultantUserId,
         targetRole: 'primary',
@@ -33,7 +64,7 @@ export async function resolveHandoffTarget(groupId: string): Promise<HandoffTarg
   }
 
   if (assignment?.secondaryConsultantUserId) {
-    if (await isActiveAssignee(assignment.secondaryConsultantUserId)) {
+    if (await isActiveReachableAssignee(assignment.secondaryConsultantUserId)) {
       return {
         userId: assignment.secondaryConsultantUserId,
         targetRole: 'secondary',

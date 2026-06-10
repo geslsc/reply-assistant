@@ -368,6 +368,36 @@ describe('consultant management batch 2', () => {
       expect(target?.targetRole).toBe('secondary');
     });
 
+    it('temporarily skips unreachable primary and restores after private inbound message', async () => {
+      await seedActiveConsultant(TEST_CONSULTANT, 'P', '35');
+      await seedActiveConsultant(TEST_CONSULTANT_B, 'S', '36');
+      await handleServiceIntroduction(TEST_GROUP, TEST_ADMIN);
+      await getRepos().groupConsultantAssignments.update(TEST_GROUP, {
+        primaryConsultantUserId: TEST_CONSULTANT,
+        secondaryConsultantUserId: TEST_CONSULTANT_B,
+      });
+
+      await getRepos().consultants.recordPushFailure(TEST_CONSULTANT, new Date().toISOString());
+      await getRepos().consultants.recordPushFailure(TEST_CONSULTANT, new Date().toISOString());
+
+      const skipped = await resolveHandoffTarget(TEST_GROUP);
+      expect(skipped?.userId).toBe(TEST_CONSULTANT_B);
+      expect(skipped?.targetRole).toBe('secondary');
+
+      await processMessage({
+        userId: TEST_CONSULTANT,
+        text: '使用說明',
+        isGroup: false,
+      });
+
+      const restoredRecord = await getRepos().consultants.findById(TEST_CONSULTANT);
+      expect(restoredRecord?.pushFailureCount).toBe(0);
+
+      const restored = await resolveHandoffTarget(TEST_GROUP);
+      expect(restored?.userId).toBe(TEST_CONSULTANT);
+      expect(restored?.targetRole).toBe('primary');
+    });
+
     it('routes to fallback admin when no active assignee', async () => {
       await handleServiceIntroduction(TEST_GROUP, TEST_ADMIN);
       const target = await resolveHandoffTarget(TEST_GROUP);
@@ -383,7 +413,7 @@ describe('consultant management batch 2', () => {
         primaryConsultantUserId: TEST_CONSULTANT,
       });
       const thread = await createIssueThread(TEST_GROUP, '問題');
-      await executeHandoff({
+      const handoff = await executeHandoff({
         groupId: TEST_GROUP,
         issueThreadId: thread.issueThreadId,
         customerQuestion: '問題',
@@ -395,6 +425,11 @@ describe('consultant management batch 2', () => {
       const otherOpen = await getRepos().pendingHandoffs.findOpenByConsultant(TEST_CONSULTANT_B);
       expect(primaryOpen).toHaveLength(1);
       expect(otherOpen).toHaveLength(0);
+      const primaryPush = handoff.replies.find((reply) => reply.userId === TEST_CONSULTANT);
+      expect(primaryPush?.deliveryFailureFallbackUserIds).toContain(TEST_ADMIN);
+      expect(primaryPush?.deliveryFailureText).toContain('handoff 私訊投遞失敗');
+      expect(primaryPush?.deliveryFailureHandoffTransfer?.toUserId).toBe(TEST_ADMIN);
+      expect(primaryPush?.deliveryFailureHandoffTransfer?.transferText).toContain('已自動轉交給您');
 
       const event = await findManagementEvent('handoff_routed');
       expect(event?.detail).toContain('primary');

@@ -7,6 +7,7 @@ import {
 } from '../src/services/consultantWhitelist';
 import { processMessage } from '../src/handlers/lineWebhookHandler';
 import { handleServiceIntroduction } from '../src/services/servicePeriodService';
+import { getRepos } from '../src/repositories';
 import { TEST_ADMIN, TEST_CONSULTANT, TEST_CUSTOMER, TEST_GROUP } from './helpers/testSetup';
 
 describe('LINE Reply / Push Tests', () => {
@@ -130,5 +131,95 @@ describe('LINE Reply / Push Tests', () => {
 
     expect(replyText).toHaveBeenCalledWith('reply-token-private', '已核准');
     expect(pushText).toHaveBeenCalledWith(TEST_CONSULTANT, '您已核准');
+  });
+
+  it('notifies fallback users when push delivery fails', async () => {
+    const replyText = jest.fn().mockResolvedValue(undefined);
+    const pushText = jest
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce('fallback-message-id');
+    setLineMessageClient({ replyText, pushText });
+    await registerAdmin(TEST_ADMIN);
+    await registerInviteCode('TESTCODE', TEST_ADMIN);
+    await requestConsultantJoin(TEST_CONSULTANT, 'TESTCODE');
+    await approveConsultant(TEST_ADMIN, TEST_CONSULTANT);
+
+    await deliverBotReplies([
+      {
+        type: 'push',
+        userId: TEST_CONSULTANT,
+        text: '問題收斂卡',
+        trackDeliveryHealthUserId: TEST_CONSULTANT,
+        deliveryFailureFallbackUserIds: [TEST_ADMIN],
+        deliveryFailureText: 'handoff 私訊投遞失敗',
+      },
+    ]);
+
+    expect(pushText).toHaveBeenNthCalledWith(1, TEST_CONSULTANT, '問題收斂卡');
+    expect(pushText).toHaveBeenNthCalledWith(2, TEST_ADMIN, 'handoff 私訊投遞失敗');
+    expect((await getRepos().consultants.findById(TEST_CONSULTANT))?.pushFailureCount).toBe(1);
+  });
+
+  it('clears tracked push failures after successful delivery', async () => {
+    const replyText = jest.fn().mockResolvedValue(undefined);
+    const pushText = jest.fn().mockResolvedValue('message-id');
+    setLineMessageClient({ replyText, pushText });
+    await registerAdmin(TEST_ADMIN);
+    await registerInviteCode('TESTCODE', TEST_ADMIN);
+    await requestConsultantJoin(TEST_CONSULTANT, 'TESTCODE');
+    await approveConsultant(TEST_ADMIN, TEST_CONSULTANT);
+    await getRepos().consultants.recordPushFailure(TEST_CONSULTANT, new Date().toISOString());
+
+    await deliverBotReplies([
+      {
+        type: 'push',
+        userId: TEST_CONSULTANT,
+        text: '問題收斂卡',
+        trackDeliveryHealthUserId: TEST_CONSULTANT,
+      },
+    ]);
+
+    expect((await getRepos().consultants.findById(TEST_CONSULTANT))?.pushFailureCount).toBe(0);
+  });
+
+  it('transfers pending handoff to fallback recipient when primary push fails', async () => {
+    const replyText = jest.fn().mockResolvedValue(undefined);
+    const pushText = jest
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce('fallback-message-id');
+    setLineMessageClient({ replyText, pushText });
+    await registerAdmin(TEST_ADMIN);
+    await registerInviteCode('TESTCODE', TEST_ADMIN);
+    await requestConsultantJoin(TEST_CONSULTANT, 'TESTCODE');
+    await approveConsultant(TEST_ADMIN, TEST_CONSULTANT);
+    await getRepos().pendingHandoffs.create({
+      consultantId: TEST_CONSULTANT,
+      issueThreadId: 'thread-001',
+      groupId: TEST_GROUP,
+      shortCode: 'H-01',
+      customerQuestion: '店家問題',
+    });
+
+    await deliverBotReplies([
+      {
+        type: 'push',
+        userId: TEST_CONSULTANT,
+        text: '問題收斂卡',
+        trackDeliveryHealthUserId: TEST_CONSULTANT,
+        deliveryFailureHandoffTransfer: {
+          groupId: TEST_GROUP,
+          fromUserId: TEST_CONSULTANT,
+          toUserId: TEST_ADMIN,
+          transferText: 'handoff 已自動轉交給您',
+        },
+      },
+    ]);
+
+    expect(pushText).toHaveBeenNthCalledWith(1, TEST_CONSULTANT, '問題收斂卡');
+    expect(pushText).toHaveBeenNthCalledWith(2, TEST_ADMIN, 'handoff 已自動轉交給您');
+    expect(await getRepos().pendingHandoffs.findOpenByConsultant(TEST_CONSULTANT)).toHaveLength(0);
+    expect(await getRepos().pendingHandoffs.findOpenByConsultant(TEST_ADMIN)).toHaveLength(1);
   });
 });

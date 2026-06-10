@@ -2,6 +2,7 @@ import { messagingApi } from '@line/bot-sdk';
 import { getEnv } from '../config/env';
 import { logger } from '../config/logger';
 import { BotReply } from '../types';
+import { getRepos } from '../repositories';
 import { getActiveAdmins, getActiveConsultants } from './consultantWhitelist';
 
 import { registerReviewMessageMapping } from './knowledgeCardReviewService';
@@ -97,6 +98,67 @@ export async function pushToConsultants(text: string): Promise<void> {
   }
 }
 
+async function notifyPushDeliveryFailure(reply: BotReply): Promise<void> {
+  if (reply.deliveryFailureHandoffTransfer) {
+    const transfer = reply.deliveryFailureHandoffTransfer;
+    await getRepos().pendingHandoffs.transferOpenHandoffs({
+      fromConsultantId: transfer.fromUserId,
+      toConsultantId: transfer.toUserId,
+      groupId: transfer.groupId,
+    });
+
+    const transferMessageId = await pushText(transfer.toUserId, transfer.transferText);
+    if (transferMessageId) {
+      return;
+    }
+
+    const admins = await getActiveAdmins();
+    const adminFallbackUserIds = admins
+      .map((admin) => admin.userId)
+      .filter((userId) => userId !== transfer.fromUserId && userId !== transfer.toUserId);
+    const text = [
+      reply.deliveryFailureText ?? '【handoff 私訊投遞失敗】',
+      '',
+      `轉交對象 ${transfer.toUserId} 也投遞失敗，請 admin 立即進群處理。`,
+    ].join('\n');
+    for (const userId of adminFallbackUserIds) {
+      await pushText(userId, text);
+    }
+    return;
+  }
+
+  const fallbackUserIds = [...new Set(reply.deliveryFailureFallbackUserIds ?? [])].filter(
+    (userId) => userId && userId !== reply.userId
+  );
+  if (fallbackUserIds.length === 0) {
+    return;
+  }
+
+  const text =
+    reply.deliveryFailureText ??
+    [
+      '【私訊投遞失敗】',
+      `原收件人：${reply.userId ?? '未知'}`,
+      '小助手無法將訊息推送給原收件人，請協助確認。',
+    ].join('\n');
+
+  for (const userId of fallbackUserIds) {
+    await pushText(userId, text);
+  }
+}
+
+async function recordTrackedPushDelivery(reply: BotReply, messageId: string | null): Promise<void> {
+  if (!reply.trackDeliveryHealthUserId) {
+    return;
+  }
+  const now = new Date().toISOString();
+  if (messageId) {
+    await getRepos().consultants.recordPushSuccess(reply.trackDeliveryHealthUserId, now);
+    return;
+  }
+  await getRepos().consultants.recordPushFailure(reply.trackDeliveryHealthUserId, now);
+}
+
 export async function deliverBotReplies(
   replies: BotReply[],
   replyToken?: string,
@@ -124,6 +186,10 @@ export async function deliverBotReplies(
         continue;
       }
       const messageId = await pushText(reply.userId, reply.text);
+      await recordTrackedPushDelivery(reply, messageId);
+      if (!messageId) {
+        await notifyPushDeliveryFailure(reply);
+      }
       if (reply.trackReviewId && messageId) {
         await registerReviewMessageMapping(reply.trackReviewId, messageId);
       }
@@ -143,6 +209,10 @@ export async function deliverDeferredGroupReplies(
   for (const reply of replies) {
     if (reply.type === 'push' && reply.userId) {
       const messageId = await pushText(reply.userId, reply.text);
+      await recordTrackedPushDelivery(reply, messageId);
+      if (!messageId) {
+        await notifyPushDeliveryFailure(reply);
+      }
       if (reply.trackReviewId && messageId) {
         await registerReviewMessageMapping(reply.trackReviewId, messageId);
       }

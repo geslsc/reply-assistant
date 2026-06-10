@@ -126,12 +126,18 @@ CREATE TABLE IF NOT EXISTS consultants (
   disabled_by TEXT,
   disabled_at TIMESTAMPTZ,
   last_knowledge_export_at TIMESTAMPTZ,
+  push_failure_count INTEGER NOT NULL DEFAULT 0,
+  last_push_failed_at TIMESTAMPTZ,
+  last_push_succeeded_at TIMESTAMPTZ,
   CONSTRAINT consultants_role_check CHECK (role IN ('admin', 'consultant')),
   CONSTRAINT consultants_status_check CHECK (status IN ('active', 'disabled'))
 );
 
 ALTER TABLE consultants ADD COLUMN IF NOT EXISTS consultant_code TEXT;
 ALTER TABLE consultants ADD COLUMN IF NOT EXISTS disabled_by TEXT;
+ALTER TABLE consultants ADD COLUMN IF NOT EXISTS push_failure_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE consultants ADD COLUMN IF NOT EXISTS last_push_failed_at TIMESTAMPTZ;
+ALTER TABLE consultants ADD COLUMN IF NOT EXISTS last_push_succeeded_at TIMESTAMPTZ;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_consultants_consultant_code
   ON consultants(consultant_code) WHERE consultant_code IS NOT NULL;
 ALTER TABLE consultants DROP CONSTRAINT IF EXISTS consultants_status_check;

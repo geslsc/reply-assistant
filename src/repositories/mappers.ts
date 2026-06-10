@@ -76,6 +76,13 @@ export function mapConsultantRow(row: Record<string, unknown>): ConsultantRecord
     lastKnowledgeExportAt: row.last_knowledge_export_at
       ? new Date(String(row.last_knowledge_export_at)).toISOString()
       : null,
+    pushFailureCount: Number(row.push_failure_count ?? 0),
+    lastPushFailedAt: row.last_push_failed_at
+      ? new Date(String(row.last_push_failed_at)).toISOString()
+      : null,
+    lastPushSucceededAt: row.last_push_succeeded_at
+      ? new Date(String(row.last_push_succeeded_at)).toISOString()
+      : null,
   };
 }
 

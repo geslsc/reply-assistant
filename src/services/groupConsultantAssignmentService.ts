@@ -32,9 +32,26 @@ export async function isActiveAssignee(userId: string | null): Promise<boolean> 
   return !!record && record.status === ConsultantStatus.ACTIVE;
 }
 
+const HANDOFF_PUSH_FAILURE_ROUTE_SKIP_THRESHOLD = 2;
+
+export function isPushReachableAssignee(record: ConsultantRecord | null): boolean {
+  return (
+    !!record &&
+    record.status === ConsultantStatus.ACTIVE &&
+    (record.pushFailureCount ?? 0) < HANDOFF_PUSH_FAILURE_ROUTE_SKIP_THRESHOLD
+  );
+}
+
+export async function isActiveReachableAssignee(userId: string | null): Promise<boolean> {
+  if (!userId) {
+    return false;
+  }
+  return isPushReachableAssignee(await getRepos().consultants.findById(userId));
+}
+
 export async function getFallbackAdminUserId(): Promise<string | null> {
   const admins = await getActiveAdmins();
-  return admins[0]?.userId ?? null;
+  return admins.find((admin) => isPushReachableAssignee(admin))?.userId ?? admins[0]?.userId ?? null;
 }
 
 async function resolveGroupName(groupId: string): Promise<string | null> {
