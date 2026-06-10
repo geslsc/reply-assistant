@@ -152,11 +152,19 @@ async function recordTrackedPushDelivery(reply: BotReply, messageId: string | nu
     return;
   }
   const now = new Date().toISOString();
-  if (messageId) {
-    await getRepos().consultants.recordPushSuccess(reply.trackDeliveryHealthUserId, now);
-    return;
+  try {
+    if (messageId) {
+      await getRepos().consultants.recordPushSuccess(reply.trackDeliveryHealthUserId, now);
+      return;
+    }
+    await getRepos().consultants.recordPushFailure(reply.trackDeliveryHealthUserId, now);
+  } catch (error) {
+    logger.warn('Failed to record push delivery health; continuing', {
+      userId: reply.trackDeliveryHealthUserId,
+      delivered: Boolean(messageId),
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
-  await getRepos().consultants.recordPushFailure(reply.trackDeliveryHealthUserId, now);
 }
 
 export async function deliverBotReplies(

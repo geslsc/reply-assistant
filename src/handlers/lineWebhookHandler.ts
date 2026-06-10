@@ -296,7 +296,14 @@ async function handlePrivateMessage(message: IncomingMessage): Promise<BotReply[
 
   const consultantRecord = await getRepos().consultants.findById(message.userId);
   if (consultantRecord?.status === ConsultantStatus.ACTIVE) {
-    await getRepos().consultants.recordPushSuccess(message.userId, new Date().toISOString());
+    try {
+      await getRepos().consultants.recordPushSuccess(message.userId, new Date().toISOString());
+    } catch (error) {
+      logger.warn('Failed to record private inbound delivery health; continuing', {
+        userId: message.userId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   if (text === APPLY_CONSULTANT_PHRASE) {

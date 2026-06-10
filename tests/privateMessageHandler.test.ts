@@ -6,6 +6,7 @@ import { createPendingHandoff } from '../src/services/pendingHandoffService';
 import { createIssueThread } from '../src/services/issueThreadService';
 import { deriveShortCode } from '../src/services/shortCodeService';
 import { handleServiceIntroduction } from '../src/services/servicePeriodService';
+import { getRepos } from '../src/repositories';
 import { getLlmClient, setLlmClient } from '../src/services/knowledgeCardDraftService';
 import { getEventsByType } from '../src/services/eventLogService';
 import {
@@ -104,6 +105,19 @@ describe('Private message handler entry order', () => {
     await setupActiveConsultant();
     const result = await privateMsg(TEST_CONSULTANT, '整理知識卡：測試問題');
     expect(result.replies[0].text).toContain('AI 草稿整理尚未啟用');
+  });
+
+  it('active consultant organize command still replies when delivery health write fails', async () => {
+    await setupActiveConsultant();
+    const repos = getRepos();
+    jest
+      .spyOn(repos.consultants, 'recordPushSuccess')
+      .mockRejectedValueOnce(new Error('missing health column'));
+
+    const result = await privateMsg(TEST_CONSULTANT, '幫我整理知識卡');
+
+    expect(result.replies[0].text).toContain('請用下面格式提供內容');
+    expect(result.replies[0].text).toContain('店家問題：');
   });
 
   it('active consultant private reply-to-group enters confirmation flow', async () => {
