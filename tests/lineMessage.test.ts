@@ -8,6 +8,7 @@ import {
 import { processMessage } from '../src/handlers/lineWebhookHandler';
 import { handleServiceIntroduction } from '../src/services/servicePeriodService';
 import { getRepos } from '../src/repositories';
+import { handleViewPendingHandoffs } from '../src/services/pendingHandoffService';
 import { TEST_ADMIN, TEST_CONSULTANT, TEST_CUSTOMER, TEST_GROUP } from './helpers/testSetup';
 
 describe('LINE Reply / Push Tests', () => {
@@ -221,5 +222,33 @@ describe('LINE Reply / Push Tests', () => {
     expect(pushText).toHaveBeenNthCalledWith(2, TEST_ADMIN, 'handoff 已自動轉交給您');
     expect(await getRepos().pendingHandoffs.findOpenByConsultant(TEST_CONSULTANT)).toHaveLength(0);
     expect(await getRepos().pendingHandoffs.findOpenByConsultant(TEST_ADMIN)).toHaveLength(1);
+  });
+
+  it('keeps admin handoff retrievable when sole admin private push is rate limited', async () => {
+    const replyText = jest.fn().mockResolvedValue(undefined);
+    const pushText = jest.fn().mockResolvedValue(null);
+    setLineMessageClient({ replyText, pushText });
+
+    await registerAdmin(TEST_ADMIN);
+    await handleServiceIntroduction(TEST_GROUP, TEST_ADMIN);
+
+    const result = await processMessage({
+      userId: TEST_CUSTOMER,
+      groupId: TEST_GROUP,
+      text: '我的官方 line 串接好了，要怎麼讓客人預約？',
+      isGroup: true,
+    });
+    await deliverBotReplies(result.replies, 'reply-token');
+
+    expect(replyText).toHaveBeenCalledWith(
+      'reply-token',
+      expect.stringContaining('查看待處理問題')
+    );
+    expect(pushText).toHaveBeenCalledWith(TEST_ADMIN, expect.stringContaining('【問題收斂卡】'));
+    expect(await getRepos().pendingHandoffs.findOpenByConsultant(TEST_ADMIN)).toHaveLength(1);
+
+    const fallback = await handleViewPendingHandoffs(TEST_ADMIN);
+    expect(fallback[0].text).toContain('【待處理問題清單】');
+    expect(fallback[0].text).toContain('我的官方 line 串接好了');
   });
 });
