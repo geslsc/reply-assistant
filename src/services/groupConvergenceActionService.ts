@@ -20,6 +20,7 @@ import {
   buildPublicAnswer,
   routeByRisk,
 } from './riskRouter';
+import { resolveThread } from './issueThreadService';
 import {
   classifyCustomerQuestion,
   rankCandidatesForQuestion,
@@ -50,8 +51,13 @@ import {
   getConvergenceState,
   resolveOptionCard,
 } from './groupConvergenceStateService';
+import {
+  buildChitchatReply,
+  buildQuestionOpeningReply,
+  isQuestionOpeningMessage,
+  isPureChitchatMessage,
+} from './groupConversationToneService';
 
-const CHITCHAT_REPLY = '收到，若之後有操作使用上的問題，歡迎直接在群組描述喔。';
 const MAX_CLARIFY_ROUNDS = 3;
 
 function withCustomerBufferMessage(replies: BotReply[]): BotReply[] {
@@ -317,6 +323,11 @@ export async function applyConvergedQuestion(params: {
     });
   }
 
+  if (isQuestionOpeningMessage(params.question)) {
+    await resolveThread(params.groupId, params.issueThreadId);
+    return [{ type: 'group', text: buildQuestionOpeningReply() }];
+  }
+
   const classification = await classifyCustomerQuestion(params.question, { clarifyRound });
   return applySemanticClassification({
     ...params,
@@ -340,8 +351,9 @@ export async function applySemanticClassification(params: {
     return [];
   }
 
-  if (classification.isChitchat) {
-    return [{ type: 'group', text: CHITCHAT_REPLY }];
+  if (classification.isChitchat || isPureChitchatMessage(params.question)) {
+    await resolveThread(params.groupId, params.issueThreadId);
+    return [{ type: 'group', text: await buildChitchatReply(params.question) }];
   }
 
   const candidates = await rankCandidatesForQuestion(params.question);

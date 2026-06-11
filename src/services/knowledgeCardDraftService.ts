@@ -439,6 +439,45 @@ function buildDraftHeader(options?: HumanReadableDraftOptions): string[] {
   return ['【知識卡草稿｜新增】', '※ 草稿不會自動生效。'];
 }
 
+function pushListSection(lines: string[], title: string, items: string[] | null | undefined): void {
+  const cleanItems = (items ?? []).map((item) => item.trim()).filter(Boolean);
+  if (cleanItems.length === 0) {
+    return;
+  }
+  lines.push('', title, ...cleanItems.map((item) => `- ${item}`));
+}
+
+function pushTextSection(lines: string[], title: string, text: string | null | undefined): void {
+  const trimmed = text?.trim();
+  if (!trimmed) {
+    return;
+  }
+  lines.push('', title, trimmed);
+}
+
+function pushSourceConsultantInputSection(
+  lines: string[],
+  source: SourceConsultantInput | null | undefined
+): void {
+  if (!source) {
+    return;
+  }
+
+  const sourceLines: string[] = [];
+  if (source.customer_question?.trim()) {
+    sourceLines.push(`店家問題：${source.customer_question.trim()}`);
+  }
+  if (source.consultant_reply?.trim()) {
+    sourceLines.push(`顧問原文：${source.consultant_reply.trim()}`);
+  }
+  if (source.raw_input?.trim()) {
+    sourceLines.push(`原始輸入：${source.raw_input.trim()}`);
+  }
+  if (sourceLines.length > 0) {
+    lines.push('', '來源資料：', ...sourceLines);
+  }
+}
+
 export function formatHumanReadableKnowledgeCard(
   card: KnowledgeCard,
   options?: HumanReadableDraftOptions
@@ -454,10 +493,16 @@ export function formatHumanReadableKnowledgeCard(
     '',
     '店家可能會這樣問：',
     ...card.patterns.map((pattern) => `- ${pattern}`),
-    '',
-    '建議回覆內容：',
-    card.standard_answer,
   ];
+
+  pushListSection(lines, '匹配特徵：', card.match_features);
+  pushListSection(lines, '適用規則：', card.applicability_rules);
+  pushListSection(lines, '排除規則：', card.exclusion_rules);
+  pushTextSection(lines, '推理說明：', card.reasoning);
+  pushListSection(lines, '導入條件：', card.handoff_conditions);
+  pushSourceConsultantInputSection(lines, card.source_consultant_input);
+
+  lines.push('', '建議回覆內容：', card.standard_answer);
 
   if (card.not_applicable.length > 0) {
     lines.push('', '不適用情況：', ...card.not_applicable.map((item) => `- ${item}`));

@@ -25,6 +25,7 @@ import {
 import { classifyCustomerQuestion } from '../src/services/groupSemanticRoutingService';
 import { isNonSubstantiveCustomerMessage } from '../src/services/groupMessageFilterService';
 import { isHighRiskCustomerMessage } from '../src/services/groupHighRiskService';
+import { buildRound1ClarifyMessage } from '../src/services/groupConvergenceStateService';
 import { validateKnowledgeCard } from '../src/services/knowledgeCardValidator';
 import { handleServiceIntroduction } from '../src/services/servicePeriodService';
 import { getEventsByType } from '../src/services/eventLogService';
@@ -67,6 +68,10 @@ async function seedPunchCard(): Promise<void> {
 
 function groupMsg(userId: string, text: string) {
   return { userId, groupId: TEST_GROUP, text, isGroup: true };
+}
+
+function privateMsg(userId: string, text: string) {
+  return { userId, text, isGroup: false };
 }
 
 function expectNoPushHandoffNotification(replies: BotReply[]): void {
@@ -125,6 +130,16 @@ describe('Group message convergence and semantic routing', () => {
     expect((await getEventsByType(EventType.HANDOFF_TO_CONSULTANT)).length).toBe(1);
   });
 
+  it('lists pending handoffs with 待辦 aliases', async () => {
+    await processMessage(groupMsg(TEST_CUSTOMER, '畫面一片空白'));
+
+    const result = await processMessage(privateMsg(TEST_ADMIN, '查詢待辦問題'));
+    const text = result.replies.find((r) => r.type === 'push')?.text ?? '';
+
+    expect(text).toContain('【待處理問題清單】');
+    expect(text).toContain('畫面一片空白');
+  });
+
   it('handoffs with suggest-new-card when clear but no matching card', async () => {
     const result = await processMessage(
       groupMsg(TEST_CUSTOMER, '請問客立樂 xyz 特殊功能要怎麼設定')
@@ -176,8 +191,40 @@ describe('Group message convergence and semantic routing', () => {
     const result = await processMessage(groupMsg(TEST_CUSTOMER, '這個怎麼用'));
     const groupText = result.replies.find((r) => r.type === 'group')?.text ?? '';
     expect(groupText).toContain('哪個功能');
-    expect(groupText).toContain('選項編號');
+    expect(groupText).not.toContain('選項編號');
+    expect(groupText).toContain('請直接補充');
     expect((await getActiveIssueThread(TEST_GROUP))?.state).toBe(ThreadState.AI_CLARIFYING);
+  });
+
+  it('does not mention option selection in round 1 when no options are shown', async () => {
+    const message = await buildRound1ClarifyMessage({
+      question: '我不知道',
+      candidates: [],
+    });
+
+    expect(message).not.toContain('選項編號');
+    expect(message).toContain('請直接補充');
+  });
+
+  it('treats customer question-opening messages as a prompt to describe the issue', async () => {
+    const opening = await processMessage(groupMsg(TEST_CUSTOMER, '我又有問題了'));
+    const openingText = opening.replies.find((r) => r.type === 'group')?.text ?? '';
+
+    expect(openingText).toContain('直接把你遇到的畫面');
+    expect(openingText).toContain('🙂');
+    expect(await getActiveIssueThread(TEST_GROUP)).toBeUndefined();
+
+    const next = await processMessage(groupMsg(TEST_CUSTOMER, '怎麼登入後台'));
+    expect(next.replies.find((r) => r.type === 'group')?.text).toContain('登入');
+  });
+
+  it('uses short lively chitchat replies without leaving an active issue thread', async () => {
+    const result = await processMessage(groupMsg(TEST_CUSTOMER, '好的謝謝'));
+    const text = result.replies.find((r) => r.type === 'group')?.text ?? '';
+
+    expect(text).toContain('不客氣');
+    expect(text).toContain('操作問題');
+    expect(await getActiveIssueThread(TEST_GROUP)).toBeUndefined();
   });
 
   it('handoffs after three clarify rounds still unclear', async () => {
@@ -319,6 +366,18 @@ describe('Group message convergence and semantic routing', () => {
     expect((await getActiveIssueThread(TEST_GROUP))?.consultantAnswered).toBe(true);
 
     await processMessage(groupMsg(TEST_CONSULTANT, '小助手再麻煩了'));
+    expect(await getActiveIssueThread(TEST_GROUP)).toBeUndefined();
+
+    const next = await processMessage(groupMsg(TEST_CUSTOMER, '怎麼登入後台'));
+    expect(next.replies.find((r) => r.type === 'group')?.text).toContain('登入');
+  });
+
+  it('unmute command clears handoff thread so the next customer message starts fresh', async () => {
+    await processMessage(groupMsg(TEST_CUSTOMER, '畫面一片空白'));
+    expect((await getActiveIssueThread(TEST_GROUP))?.state).toBe(ThreadState.CONSULTANT_HANDOFF);
+
+    const unmute = await processMessage(groupMsg(TEST_CONSULTANT, '小助手再麻煩了'));
+    expect(unmute.replies.find((r) => r.type === 'group')?.text).toContain('隨時待命');
     expect(await getActiveIssueThread(TEST_GROUP)).toBeUndefined();
 
     const next = await processMessage(groupMsg(TEST_CUSTOMER, '怎麼登入後台'));

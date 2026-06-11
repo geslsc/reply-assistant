@@ -448,7 +448,7 @@ describe('low volume todo query type', () => {
         clarifyRound: 0,
       });
       expect(replies).toHaveLength(1);
-      expect(replies[0].text).toMatch(/收到/);
+      expect(replies[0].text).toMatch(/操作問題/);
       expect(await getRepos().pendingHandoffs.findActionableByConsultant(TEST_CONSULTANT)).toHaveLength(
         0
       );

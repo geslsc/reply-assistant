@@ -3,11 +3,7 @@ import { CLOSING_SIGNALS } from '../types';
 const NON_SUBSTANTIVE_EXACT = new Set([
   'ok',
   'okay',
-  '好的',
   '好',
-  '謝謝',
-  '谢谢',
-  '謝啦',
   '了解',
   '知道了',
   '收到',

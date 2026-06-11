@@ -196,10 +196,14 @@ async function handleClosingSignal(
 
 async function resolveHumanTakeoverThreadOnResume(
   groupId: string,
-  userId: string
+  userId: string,
+  options?: { force?: boolean }
 ): Promise<void> {
   const thread = await getActiveIssueThread(groupId);
-  if (!thread || (!thread.consultantAnswered && !thread.autoReplyBlocked)) {
+  if (
+    !thread ||
+    (!options?.force && !thread.consultantAnswered && !thread.autoReplyBlocked)
+  ) {
     return;
   }
 
@@ -604,7 +608,7 @@ export async function processMessage(message: IncomingMessage): Promise<ProcessR
     }
     if (assistantCommand === GROUP_ASSISTANT_COMMANDS.UNMUTE) {
       replies.push(...(await handleConsultantMute(groupId, message.userId, false)));
-      await resolveHumanTakeoverThreadOnResume(groupId, message.userId);
+      await resolveHumanTakeoverThreadOnResume(groupId, message.userId, { force: true });
       replies.push(...(await ensureServicePeriodForResume(groupId, message.userId)));
       replies.push(...sideEffectReplies);
       return { replies, events: await getEventLogs() };

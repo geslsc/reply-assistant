@@ -175,6 +175,37 @@ describe('Knowledge card draft mode and UX', () => {
     expect(text).not.toMatch(/can_public_reply/);
   });
 
+  it('human readable draft shows enhanced card fields', () => {
+    const text = formatHumanReadableKnowledgeCard(
+      withEnhancedKnowledgeFields({
+        ...checkoutTutorialCard,
+        core_question: '如何新增結帳單？',
+        match_features: ['新增結帳單', '結帳操作'],
+        applicability_rules: ['店家詢問新增結帳單入口或操作步驟'],
+        exclusion_rules: ['店家詢問實際付款或入帳狀態'],
+        reasoning: '這張卡只適用操作教學，不處理帳務個案。',
+        handoff_conditions: ['涉及金額、付款、入帳狀態時導入教練'],
+        source_consultant_input: {
+          customer_question: '怎麼新增結帳單',
+          consultant_reply: '到「結帳」→「新增結帳單」。',
+          raw_input: '店家問題：怎麼新增結帳單\n建議回覆：到「結帳」→「新增結帳單」。',
+        },
+      }),
+      { draftMode: 'create' }
+    );
+
+    expect(text).toMatch(/匹配特徵：/);
+    expect(text).toMatch(/- 新增結帳單/);
+    expect(text).toMatch(/適用規則：/);
+    expect(text).toMatch(/排除規則：/);
+    expect(text).toMatch(/推理說明：/);
+    expect(text).toMatch(/導入條件：/);
+    expect(text).toMatch(/來源資料：/);
+    expect(text).toMatch(/顧問原文：到「結帳」→「新增結帳單」。/);
+    expect(text).not.toMatch(/match_features/);
+    expect(text).not.toMatch(/source_consultant_input/);
+  });
+
   it('modify draft header shows target card', () => {
     const text = formatHumanReadableKnowledgeCard(existingCard, {
       draftMode: 'update',

@@ -86,7 +86,15 @@ export function buildHandoffShortReminder(params: {
 }
 
 export function isViewPendingHandoffsPhrase(text: string): boolean {
-  return text.trim() === '查看待處理問題';
+  const trimmed = text.trim();
+  return [
+    '查看待處理問題',
+    '查詢待處理問題',
+    '查看待辦問題',
+    '查詢待辦問題',
+    '待處理問題',
+    '待辦問題',
+  ].includes(trimmed);
 }
 
 export function isSnoozeHandoffPhrase(text: string): boolean {

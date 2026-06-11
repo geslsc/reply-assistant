@@ -27,31 +27,10 @@ export function formatHumanReadableDraftData(
   header.push('');
 
   const cardView = formatHumanReadableKnowledgeCard(draftDataToKnowledgeCard(draft));
-  const extraLines: string[] = [];
-
-  if (draft.core_question) {
-    extraLines.push('', '核心問題：', draft.core_question);
-  }
-  if (draft.match_features.length > 0) {
-    extraLines.push('', '匹配特徵：', ...draft.match_features.map((item) => `- ${item}`));
-  }
-  if (draft.applicability_rules.length > 0) {
-    extraLines.push('', '適用規則：', ...draft.applicability_rules.map((item) => `- ${item}`));
-  }
-  if (draft.exclusion_rules.length > 0) {
-    extraLines.push('', '排除規則：', ...draft.exclusion_rules.map((item) => `- ${item}`));
-  }
-  if (draft.reasoning) {
-    extraLines.push('', '推理說明：', draft.reasoning);
-  }
-  if (draft.handoff_conditions.length > 0) {
-    extraLines.push('', '導入條件：', ...draft.handoff_conditions.map((item) => `- ${item}`));
-  }
 
   return [
     ...header,
     cardView,
-    ...extraLines,
     '',
     '可回覆：',
     options?.shortCode
