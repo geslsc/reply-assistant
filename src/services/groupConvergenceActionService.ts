@@ -2,6 +2,7 @@ import {
   Actor,
   BotReply,
   CUSTOMER_HANDOFF_BUFFER_MESSAGE,
+  ConvergenceStateRef,
   EventType,
   RiskLevel,
   ThreadState,
@@ -14,13 +15,14 @@ import {
 } from './consultantHandoffService';
 import { isOfficialCsCard } from './knowledgeBaseService';
 import { buildOfficialCsAnswer } from './officialCsService';
-import { updateIssueThread } from './issueThreadService';
+import { getIssueThread, updateIssueThread } from './issueThreadService';
 import {
   buildPublicAnswer,
   routeByRisk,
 } from './riskRouter';
 import {
   classifyCustomerQuestion,
+  rankCandidatesForQuestion,
   resolveCardFromClassification,
   SemanticClassification,
 } from './groupSemanticRoutingService';
@@ -30,10 +32,27 @@ import {
   transitionState,
 } from './stateMachine';
 import { highRiskHandoffReason } from './groupHighRiskService';
-import { getIssueThread } from './issueThreadService';
 import { shouldSkipAutoReplyForThread } from './roundQuietService';
+import {
+  hasCandidateSetNarrowed,
+  isNoInformationReply,
+  isVagueGroupQuestion,
+  narrowCandidatesWithinPreviousSet,
+  parseOptionSelection,
+  rankEnhancedCardCandidates,
+  ScoredCardCandidate,
+  shouldImmediateHandoffForCard,
+} from './groupEnhancedCardMatchingService';
+import {
+  buildRound1ClarifyMessage,
+  buildRound2ClarifyMessage,
+  buildRound3ClarifyMessage,
+  getConvergenceState,
+  resolveOptionCard,
+} from './groupConvergenceStateService';
 
 const CHITCHAT_REPLY = '收到，若之後有操作使用上的問題，歡迎直接在群組描述喔。';
+const MAX_CLARIFY_ROUNDS = 3;
 
 function withCustomerBufferMessage(replies: BotReply[]): BotReply[] {
   const hasBuffer = replies.some(
@@ -45,10 +64,19 @@ function withCustomerBufferMessage(replies: BotReply[]): BotReply[] {
   return [{ type: 'group', text: CUSTOMER_HANDOFF_BUFFER_MESSAGE }, ...replies];
 }
 
+async function persistConvergenceState(
+  groupId: string,
+  issueThreadId: string,
+  state: ConvergenceStateRef | null
+): Promise<void> {
+  await updateIssueThread(groupId, issueThreadId, { convergenceState: state });
+}
+
 async function applyPublicAnswer(params: {
   groupId: string;
   issueThreadId: string;
   card: KnowledgeCard;
+  customerQuestion?: string;
 }): Promise<BotReply[]> {
   const answer = buildPublicAnswer(params.card.standard_answer);
   await transitionState({
@@ -60,7 +88,8 @@ async function applyPublicAnswer(params: {
   });
   await updateIssueThread(params.groupId, params.issueThreadId, {
     lastKnowledgeCardId: params.card.card_id,
-    customerQuestion: params.card.title,
+    customerQuestion: params.customerQuestion ?? params.card.title,
+    convergenceState: null,
   });
   await createEvent({
     event_type: EventType.KNOWLEDGE_HIT,
@@ -87,6 +116,7 @@ async function applyClarify(params: {
   issueThreadId: string;
   question: string;
   clarifyRound: number;
+  convergenceState?: ConvergenceStateRef | null;
 }): Promise<BotReply[]> {
   await incrementClarifyRound(params.groupId, params.issueThreadId);
   await transitionState({
@@ -96,6 +126,9 @@ async function applyClarify(params: {
     actor: Actor.BOT,
     detail: `clarify round ${params.clarifyRound + 1}`,
   });
+  if (params.convergenceState) {
+    await persistConvergenceState(params.groupId, params.issueThreadId, params.convergenceState);
+  }
   return [{ type: 'group', text: params.question }];
 }
 
@@ -121,6 +154,7 @@ async function applyHandoff(params: {
       knowledge_card_id: params.card.card_id,
     });
   }
+  await updateIssueThread(params.groupId, params.issueThreadId, { convergenceState: null });
   const handoff = await executeHandoff({
     groupId: params.groupId,
     issueThreadId: params.issueThreadId,
@@ -132,6 +166,128 @@ async function applyHandoff(params: {
     notifyTarget: GROUP_CONVERGENCE_HANDOFF_NOTIFY,
   });
   return withCustomerBufferMessage(handoff.replies);
+}
+
+async function applyResolvedCard(params: {
+  groupId: string;
+  issueThreadId: string;
+  customerUserId: string;
+  customerQuestion: string;
+  card: KnowledgeCard;
+}): Promise<BotReply[]> {
+  if (isOfficialCsCard(params.card)) {
+    const csAnswer = buildOfficialCsAnswer(params.card);
+    await createEvent({
+      event_type: EventType.OFFICIAL_CS_REDIRECT,
+      group_id: params.groupId,
+      issue_thread_id: params.issueThreadId,
+      actor: Actor.BOT,
+      knowledge_card_id: params.card.card_id,
+    });
+    await updateIssueThread(params.groupId, params.issueThreadId, { convergenceState: null });
+    return [{ type: 'group', text: csAnswer }];
+  }
+
+  if (params.card.risk_level === RiskLevel.LOW && params.card.can_public_reply) {
+    return applyPublicAnswer({
+      groupId: params.groupId,
+      issueThreadId: params.issueThreadId,
+      card: params.card,
+      customerQuestion: params.customerQuestion,
+    });
+  }
+
+  return applyHandoff({
+    groupId: params.groupId,
+    issueThreadId: params.issueThreadId,
+    customerQuestion: params.customerQuestion,
+    card: params.card,
+    reason: '命中知識卡但不可公開自動回覆',
+    riskLevel: params.card.risk_level,
+    actorUserId: params.customerUserId,
+  });
+}
+
+async function startConvergenceRound1(params: {
+  groupId: string;
+  issueThreadId: string;
+  question: string;
+  candidates: ScoredCardCandidate[];
+  clarifyRound: number;
+}): Promise<BotReply[]> {
+  const message = await buildRound1ClarifyMessage({
+    question: params.question,
+    candidates: params.candidates,
+  });
+  return applyClarify({
+    groupId: params.groupId,
+    issueThreadId: params.issueThreadId,
+    question: message,
+    clarifyRound: params.clarifyRound,
+    convergenceState: {
+      candidateCardIds: params.candidates.map((item) => item.card.card_id),
+    },
+  });
+}
+
+async function startConvergenceRound2(params: {
+  groupId: string;
+  issueThreadId: string;
+  question: string;
+  candidates: ScoredCardCandidate[];
+  clarifyRound: number;
+}): Promise<BotReply[]> {
+  const round2 = await buildRound2ClarifyMessage({
+    question: params.question,
+    candidates: params.candidates,
+  });
+  return applyClarify({
+    groupId: params.groupId,
+    issueThreadId: params.issueThreadId,
+    question: round2.message,
+    clarifyRound: params.clarifyRound,
+    convergenceState: {
+      candidateCardIds: params.candidates.map((item) => item.card.card_id),
+      round2Options: round2.options,
+    },
+  });
+}
+
+async function startConvergenceRound3(params: {
+  groupId: string;
+  issueThreadId: string;
+  question: string;
+  candidates: ScoredCardCandidate[];
+  clarifyRound: number;
+  round2Options: ConvergenceStateRef['round2Options'];
+}): Promise<BotReply[]> {
+  const round3 = await buildRound3ClarifyMessage({
+    question: params.question,
+    candidates: params.candidates,
+  });
+  return applyClarify({
+    groupId: params.groupId,
+    issueThreadId: params.issueThreadId,
+    question: round3.message,
+    clarifyRound: params.clarifyRound,
+    convergenceState: {
+      candidateCardIds: params.candidates.map((item) => item.card.card_id),
+      round2Options: params.round2Options,
+      round3Options: round3.options,
+    },
+  });
+}
+
+async function resolveCandidatesFromState(
+  question: string,
+  state: ConvergenceStateRef | null
+): Promise<ScoredCardCandidate[]> {
+  const ranked = await rankEnhancedCardCandidates(question);
+  if (!state?.candidateCardIds?.length) {
+    return ranked;
+  }
+  const allowed = new Set(state.candidateCardIds);
+  return ranked.filter((item) => allowed.has(item.card.card_id));
 }
 
 export async function applyConvergedQuestion(params: {
@@ -188,26 +344,70 @@ export async function applySemanticClassification(params: {
     return [{ type: 'group', text: CHITCHAT_REPLY }];
   }
 
-  if (!classification.intentClear) {
-    if (clarifyRound >= 2) {
+  const candidates = await rankCandidatesForQuestion(params.question);
+
+  if (classification.requiresConvergence || !classification.intentClear) {
+    if (clarifyRound > MAX_CLARIFY_ROUNDS) {
       return applyHandoff({
         groupId: params.groupId,
         issueThreadId: params.issueThreadId,
         customerQuestion: params.question,
         card: resolveCardFromClassification(classification),
-        reason: '釐清 2 輪後仍無法收斂',
+        reason: '釐清 3 輪後仍無法收斂',
         riskLevel: RiskLevel.UNKNOWN,
         actorUserId: params.customerUserId,
       });
     }
-    const clarifyQuestion =
-      classification.clarifyQuestion?.trim() ||
-      '想再確認一下，您是指哪個功能或哪個步驟呢？';
-    return applyClarify({
+
+    if (candidates.length === 0) {
+      if (clarifyRound === 0 && isVagueGroupQuestion(params.question)) {
+        return startConvergenceRound1({
+          groupId: params.groupId,
+          issueThreadId: params.issueThreadId,
+          question: params.question,
+          candidates: [],
+          clarifyRound,
+        });
+      }
+      return applyHandoff({
+        groupId: params.groupId,
+        issueThreadId: params.issueThreadId,
+        customerQuestion: params.question,
+        card: null,
+        reason: '店家問題模糊，且知識庫無可用候選卡',
+        riskLevel: RiskLevel.UNKNOWN,
+        actorUserId: params.customerUserId,
+      });
+    }
+
+    if (clarifyRound === 0) {
+      return startConvergenceRound1({
+        groupId: params.groupId,
+        issueThreadId: params.issueThreadId,
+        question: params.question,
+        candidates,
+        clarifyRound,
+      });
+    }
+
+    if (clarifyRound === 1) {
+      return startConvergenceRound2({
+        groupId: params.groupId,
+        issueThreadId: params.issueThreadId,
+        question: params.question,
+        candidates,
+        clarifyRound,
+      });
+    }
+
+    return applyHandoff({
       groupId: params.groupId,
       issueThreadId: params.issueThreadId,
-      question: clarifyQuestion,
-      clarifyRound,
+      customerQuestion: params.question,
+      card: null,
+      reason: '釐清後仍無法收斂',
+      riskLevel: RiskLevel.UNKNOWN,
+      actorUserId: params.customerUserId,
     });
   }
 
@@ -241,6 +441,18 @@ export async function applySemanticClassification(params: {
     });
   }
 
+  if (shouldImmediateHandoffForCard(card) && card.risk_level === RiskLevel.HIGH) {
+    return applyHandoff({
+      groupId: params.groupId,
+      issueThreadId: params.issueThreadId,
+      customerQuestion: params.question,
+      card,
+      reason: '高風險問題需導入教練協助',
+      riskLevel: card.risk_level,
+      actorUserId: params.customerUserId,
+    });
+  }
+
   if (isOfficialCsCard(card)) {
     const csAnswer = buildOfficialCsAnswer(card);
     await createEvent({
@@ -262,6 +474,7 @@ export async function applySemanticClassification(params: {
       groupId: params.groupId,
       issueThreadId: params.issueThreadId,
       card,
+      customerQuestion: params.question,
     });
   }
 
@@ -271,6 +484,7 @@ export async function applySemanticClassification(params: {
       groupId: params.groupId,
       issueThreadId: params.issueThreadId,
       card,
+      customerQuestion: params.question,
     });
   }
 
@@ -311,8 +525,181 @@ export async function applyClarifyFollowUp(params: {
   previousQuestion: string;
   followUpText: string;
 }): Promise<BotReply[]> {
-  const combined = [params.previousQuestion, params.followUpText].filter(Boolean).join('\n');
+  const thread = await getIssueThread(params.groupId, params.issueThreadId);
+  if (thread && shouldSkipAutoReplyForThread(thread)) {
+    return [];
+  }
+
   const clarifyRound = await getClarifyRound(params.groupId, params.issueThreadId);
+  const combined = [params.previousQuestion, params.followUpText].filter(Boolean).join('\n');
+  const convergenceState = getConvergenceState(thread);
+
+  await updateIssueThread(params.groupId, params.issueThreadId, {
+    customerQuestion: combined,
+  });
+
+  if (clarifyRound > MAX_CLARIFY_ROUNDS) {
+    return applyHandoff({
+      groupId: params.groupId,
+      issueThreadId: params.issueThreadId,
+      customerQuestion: combined,
+      card: null,
+      reason: '釐清 3 輪後仍無法收斂',
+      riskLevel: RiskLevel.UNKNOWN,
+      actorUserId: params.customerUserId,
+    });
+  }
+
+  if (clarifyRound === 1) {
+    const classification = await classifyCustomerQuestion(combined, { clarifyRound });
+    if (classification.intentClear && classification.cardId) {
+      const card = resolveCardFromClassification(classification);
+      if (card) {
+        return applyResolvedCard({
+          groupId: params.groupId,
+          issueThreadId: params.issueThreadId,
+          customerUserId: params.customerUserId,
+          customerQuestion: combined,
+          card,
+        });
+      }
+    }
+
+    const candidates = await resolveCandidatesFromState(combined, convergenceState);
+    if (candidates.length === 0) {
+      return applyHandoff({
+        groupId: params.groupId,
+        issueThreadId: params.issueThreadId,
+        customerQuestion: combined,
+        card: null,
+        reason: '釐清後仍無可用候選卡',
+        riskLevel: RiskLevel.UNKNOWN,
+        actorUserId: params.customerUserId,
+      });
+    }
+    return startConvergenceRound2({
+      groupId: params.groupId,
+      issueThreadId: params.issueThreadId,
+      question: combined,
+      candidates,
+      clarifyRound,
+    });
+  }
+
+  if (clarifyRound === 2) {
+    const round2Options = convergenceState?.round2Options ?? [];
+    const selection = parseOptionSelection(params.followUpText, round2Options.length);
+    if (selection) {
+      const card = resolveOptionCard(round2Options, selection);
+      if (!card) {
+        return applyHandoff({
+          groupId: params.groupId,
+          issueThreadId: params.issueThreadId,
+          customerQuestion: combined,
+          card: null,
+          reason: '選項對應的知識卡不存在',
+          riskLevel: RiskLevel.UNKNOWN,
+          actorUserId: params.customerUserId,
+        });
+      }
+      return applyResolvedCard({
+        groupId: params.groupId,
+        issueThreadId: params.issueThreadId,
+        customerUserId: params.customerUserId,
+        customerQuestion: combined,
+        card,
+      });
+    }
+
+    if (isNoInformationReply(params.followUpText)) {
+      return applyHandoff({
+        groupId: params.groupId,
+        issueThreadId: params.issueThreadId,
+        customerQuestion: combined,
+        card: null,
+        reason: '店家未提供可縮小候選卡範圍的新資訊',
+        riskLevel: RiskLevel.UNKNOWN,
+        actorUserId: params.customerUserId,
+      });
+    }
+
+    const previousIds = convergenceState?.candidateCardIds ?? [];
+    const followUpCandidates = await rankEnhancedCardCandidates(params.followUpText);
+    const narrowedCandidates = narrowCandidatesWithinPreviousSet({
+      followUpText: params.followUpText,
+      previousIds,
+      candidates: followUpCandidates,
+    });
+    const nextIds = narrowedCandidates.map((item) => item.card.card_id);
+
+    if (narrowedCandidates.length === 1) {
+      return applyResolvedCard({
+        groupId: params.groupId,
+        issueThreadId: params.issueThreadId,
+        customerUserId: params.customerUserId,
+        customerQuestion: combined,
+        card: narrowedCandidates[0].card,
+      });
+    }
+
+    if (!hasCandidateSetNarrowed(previousIds, nextIds) || narrowedCandidates.length < 2) {
+      return applyHandoff({
+        groupId: params.groupId,
+        issueThreadId: params.issueThreadId,
+        customerQuestion: combined,
+        card: null,
+        reason: '補充描述未能縮小候選卡範圍',
+        riskLevel: RiskLevel.UNKNOWN,
+        actorUserId: params.customerUserId,
+      });
+    }
+
+    return startConvergenceRound3({
+      groupId: params.groupId,
+      issueThreadId: params.issueThreadId,
+      question: combined,
+      candidates: narrowedCandidates.slice(0, 3),
+      clarifyRound,
+      round2Options,
+    });
+  }
+
+  if (clarifyRound === 3) {
+    const round3Options = convergenceState?.round3Options ?? [];
+    const selection = parseOptionSelection(params.followUpText, round3Options.length);
+    if (selection) {
+      const card = resolveOptionCard(round3Options, selection);
+      if (!card) {
+        return applyHandoff({
+          groupId: params.groupId,
+          issueThreadId: params.issueThreadId,
+          customerQuestion: combined,
+          card: null,
+          reason: '第三輪選項對應的知識卡不存在',
+          riskLevel: RiskLevel.UNKNOWN,
+          actorUserId: params.customerUserId,
+        });
+      }
+      return applyResolvedCard({
+        groupId: params.groupId,
+        issueThreadId: params.issueThreadId,
+        customerUserId: params.customerUserId,
+        customerQuestion: combined,
+        card,
+      });
+    }
+
+    return applyHandoff({
+      groupId: params.groupId,
+      issueThreadId: params.issueThreadId,
+      customerQuestion: combined,
+      card: null,
+      reason: '第三輪後仍無法收斂',
+      riskLevel: RiskLevel.UNKNOWN,
+      actorUserId: params.customerUserId,
+    });
+  }
+
   const classification = await classifyCustomerQuestion(combined, { clarifyRound });
   return applySemanticClassification({
     groupId: params.groupId,

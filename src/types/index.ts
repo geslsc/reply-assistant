@@ -81,6 +81,18 @@ export interface GroupFlags {
   servicePeriodEndNotified: boolean;
 }
 
+export interface ConvergenceOptionRef {
+  index: number;
+  cardId: string;
+  label: string;
+}
+
+export interface ConvergenceStateRef {
+  candidateCardIds: string[];
+  round2Options?: ConvergenceOptionRef[];
+  round3Options?: ConvergenceOptionRef[];
+}
+
 export interface IssueThread {
   issueThreadId: string;
   groupId: string;
@@ -95,6 +107,7 @@ export interface IssueThread {
   lastKnowledgeCardId: string | null;
   customerQuestion: string | null;
   autoReplyBlocked?: boolean;
+  convergenceState?: ConvergenceStateRef | null;
 }
 
 export interface ConsultantRecord {

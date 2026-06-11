@@ -1,4 +1,5 @@
 import {
+  ConvergenceStateRef,
   ConsultantRecord,
   ConsultantRole,
   ConsultantStatus,
@@ -52,6 +53,47 @@ export function mapThreadRow(row: Record<string, unknown>): IssueThread {
     lastKnowledgeCardId: row.knowledge_card_id ? String(row.knowledge_card_id) : null,
     customerQuestion: metadata.customerQuestion ? String(metadata.customerQuestion) : null,
     autoReplyBlocked: Boolean(metadata.autoReplyBlocked),
+    convergenceState: parseConvergenceState(metadata.convergenceState),
+  };
+}
+
+function parseConvergenceState(raw: unknown): ConvergenceStateRef | null {
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
+  const obj = raw as Record<string, unknown>;
+  const candidateCardIds = Array.isArray(obj.candidateCardIds)
+    ? obj.candidateCardIds.filter((id): id is string => typeof id === 'string')
+    : [];
+  const parseOptions = (value: unknown) => {
+    if (!Array.isArray(value)) {
+      return undefined;
+    }
+    return value
+      .map((item) => {
+        if (!item || typeof item !== 'object') {
+          return null;
+        }
+        const option = item as Record<string, unknown>;
+        if (typeof option.cardId !== 'string' || typeof option.label !== 'string') {
+          return null;
+        }
+        return {
+          index: Number(option.index),
+          cardId: option.cardId,
+          label: option.label,
+        };
+      })
+      .filter(
+        (
+          item
+        ): item is { index: number; cardId: string; label: string } => Boolean(item)
+      );
+  };
+  return {
+    candidateCardIds,
+    round2Options: parseOptions(obj.round2Options),
+    round3Options: parseOptions(obj.round3Options),
   };
 }
 
@@ -101,5 +143,6 @@ export function threadToMetadata(thread: Partial<IssueThread>): Record<string, u
     consultantAnswered: thread.consultantAnswered ?? false,
     customerQuestion: thread.customerQuestion ?? null,
     autoReplyBlocked: thread.autoReplyBlocked ?? false,
+    convergenceState: thread.convergenceState ?? null,
   };
 }

@@ -1,7 +1,15 @@
 import { getEnv } from '../config/env';
 import { KnowledgeCard } from '../schemas/knowledgeCardSchema';
-import { getKnowledgeItems, getCardById, matchKnowledgeCard } from './knowledgeBaseService';
+import { getKnowledgeItems, getCardById } from './knowledgeBaseService';
 import { getLlmClient } from './knowledgeCardDraftService';
+import {
+  canApplySingleCardDirectly,
+  enhancedMatchToConfidence,
+  isBroadCategoryAmbiguity,
+  isVagueGroupQuestion,
+  rankEnhancedCardCandidates,
+  ScoredCardCandidate,
+} from './groupEnhancedCardMatchingService';
 import { isQuestionUnclear } from './riskRouter';
 
 export type SemanticConfidence = 'high' | 'medium' | 'low';
@@ -14,6 +22,8 @@ export interface SemanticClassification {
   summary: string;
   usedLlm: boolean;
   isChitchat?: boolean;
+  candidateCardIds?: string[];
+  requiresConvergence?: boolean;
 }
 
 const GROUP_ROUTING_SYSTEM_PROMPT = `你是客立樂教學小助手的語意判斷模組。
@@ -24,6 +34,7 @@ const GROUP_ROUTING_SYSTEM_PROMPT = `你是客立樂教學小助手的語意判�
 看不懂或無對應卡時，誠實回報，不要硬湊一張卡。
 若意圖模糊，請產生一句客製釐清問題（針對聽不懂的部分，不可使用固定罐頭）。
 你只能依顧問知識庫內容判斷，不可發明產品功能。
+若問題只命中大分類（例如只提到預約、設定、會員）而無法唯一對應，intent_clear 必須為 false。
 
 請只輸出 JSON，格式：
 {
@@ -40,10 +51,20 @@ const GROUP_ROUTING_SYSTEM_PROMPT = `你是客立樂教學小助手的語意判�
 function buildKnowledgeCatalog(): string {
   return getKnowledgeItems()
     .filter((card) => card.status === '可用')
-    .map(
-      (card) =>
-        `- card_id: ${card.card_id}\n  title: ${card.title}\n  patterns: ${card.patterns.join('、')}`
-    )
+    .map((card) => {
+      const lines = [
+        `- card_id: ${card.card_id}`,
+        `  topic: ${card.title}`,
+        `  core_question: ${card.core_question ?? card.title}`,
+        `  match_features: ${(card.match_features ?? []).join('、') || '（無）'}`,
+        `  applicability_rules: ${(card.applicability_rules ?? []).join('、') || '（無）'}`,
+        `  exclusion_rules: ${(card.exclusion_rules ?? []).join('、') || '（無）'}`,
+        `  patterns: ${card.patterns.join('、')}`,
+        `  risk_level: ${card.risk_level}`,
+        `  can_public_reply: ${card.can_public_reply}`,
+      ];
+      return lines.join('\n');
+    })
     .join('\n');
 }
 
@@ -79,22 +100,124 @@ function parseClassificationJson(raw: string): SemanticClassification | null {
   }
 }
 
-function buildFallbackClarifyQuestion(text: string, cards: KnowledgeCard[]): string {
-  const sampleTitles = cards
-    .filter((c) => c.status === '可用' && c.card_id !== 'official-cs-redirect')
-    .slice(0, 3)
-    .map((c) => c.title.replace(/教學|操作|設定/g, '').trim())
-    .filter(Boolean);
-  const examples = sampleTitles.length > 0 ? sampleTitles.join('、') : '登入、訂單、會員';
-  if (/這個|那個|怎麼用/u.test(text)) {
-    return `您是想問哪個功能呢？例如${examples}？`;
+function buildEnhancedClassification(
+  question: string,
+  candidates: ScoredCardCandidate[]
+): SemanticClassification {
+  const candidateCardIds = candidates.map((item) => item.card.card_id);
+  const direct = canApplySingleCardDirectly(candidates, question);
+  const requiresConvergence =
+    isVagueGroupQuestion(question) && !canApplySingleCardDirectly(candidates, question);
+
+  if (requiresConvergence) {
+    return {
+      intentClear: false,
+      cardId: null,
+      confidence: 'low',
+      clarifyQuestion: null,
+      summary: question,
+      usedLlm: false,
+      candidateCardIds,
+      requiresConvergence: true,
+    };
   }
-  return `想再確認一下，您是指哪個功能或哪個步驟呢？例如${examples}？`;
+
+  if (direct) {
+    return {
+      intentClear: true,
+      cardId: direct.card.card_id,
+      confidence: enhancedMatchToConfidence(direct, candidates),
+      clarifyQuestion: null,
+      summary: question,
+      usedLlm: false,
+      candidateCardIds,
+      requiresConvergence: false,
+    };
+  }
+
+  if (candidates.length === 0) {
+    return {
+      intentClear: !isQuestionUnclear(question),
+      cardId: null,
+      confidence: 'low',
+      clarifyQuestion: null,
+      summary: question,
+      usedLlm: false,
+      candidateCardIds: [],
+      requiresConvergence: false,
+    };
+  }
+
+  return {
+    intentClear: !isVagueGroupQuestion(question) && !isQuestionUnclear(question),
+    cardId: null,
+    confidence: 'low',
+    clarifyQuestion: null,
+    summary: question,
+    usedLlm: false,
+    candidateCardIds,
+    requiresConvergence: isVagueGroupQuestion(question),
+  };
+}
+
+async function reconcileLlmClassification(
+  question: string,
+  parsed: SemanticClassification
+): Promise<SemanticClassification> {
+  const candidates = await rankEnhancedCardCandidates(question);
+  const candidateCardIds = candidates.map((item) => item.card.card_id);
+  const enhanced = buildEnhancedClassification(question, candidates);
+
+  if (parsed.isChitchat) {
+    return { ...parsed, candidateCardIds, requiresConvergence: false };
+  }
+
+  if (parsed.cardId && !getCardById(parsed.cardId)) {
+    return {
+      ...parsed,
+      cardId: null,
+      confidence: 'low',
+      intentClear: false,
+      candidateCardIds,
+      requiresConvergence: true,
+    };
+  }
+
+  if (enhanced.requiresConvergence) {
+    return {
+      ...parsed,
+      intentClear: false,
+      cardId: null,
+      confidence: 'low',
+      candidateCardIds,
+      requiresConvergence: true,
+    };
+  }
+
+  if (parsed.intentClear && parsed.cardId) {
+    const cardAllowed = enhanced.cardId === parsed.cardId || enhanced.intentClear;
+    if (!cardAllowed) {
+      return {
+        ...parsed,
+        intentClear: false,
+        cardId: null,
+        confidence: 'low',
+        candidateCardIds,
+        requiresConvergence: true,
+      };
+    }
+  }
+
+  return {
+    ...parsed,
+    candidateCardIds,
+    requiresConvergence: enhanced.requiresConvergence,
+  };
 }
 
 export async function classifyCustomerQuestion(
   question: string,
-  options?: { clarifyRound?: number }
+  _options?: { clarifyRound?: number }
 ): Promise<SemanticClassification> {
   const llm = getLlmClient();
   if (llm && getEnv().OPENAI_API_KEY) {
@@ -105,60 +228,15 @@ export async function classifyCustomerQuestion(
       );
       const parsed = parseClassificationJson(raw);
       if (parsed) {
-        if (parsed.cardId && !getCardById(parsed.cardId)) {
-          parsed.cardId = null;
-          parsed.confidence = 'low';
-        }
-        return parsed;
+        return reconcileLlmClassification(question, parsed);
       }
     } catch {
-      // fall through to keyword routing
+      // fall through to enhanced routing
     }
   }
 
-  return classifyWithoutLlm(question, options?.clarifyRound ?? 0);
-}
-
-async function classifyWithoutLlm(
-  question: string,
-  clarifyRound: number
-): Promise<SemanticClassification> {
-  const match = await matchKnowledgeCard(question);
-  const unclear = isQuestionUnclear(question);
-
-  if (unclear && clarifyRound < 2) {
-    return {
-      intentClear: false,
-      cardId: match.card?.card_id ?? null,
-      confidence: 'low',
-      clarifyQuestion: buildFallbackClarifyQuestion(question, getKnowledgeItems()),
-      summary: question,
-      usedLlm: false,
-    };
-  }
-
-  if (match.confidence === 'miss' || !match.card) {
-    return {
-      intentClear: clarifyRound >= 2 ? false : !unclear,
-      cardId: null,
-      confidence: 'low',
-      clarifyQuestion: null,
-      summary: question,
-      usedLlm: false,
-    };
-  }
-
-  const confidence: SemanticConfidence =
-    match.confidence === 'hit' ? 'high' : match.confidence === 'partial' ? 'medium' : 'low';
-
-  return {
-    intentClear: !unclear || match.confidence === 'hit',
-    cardId: match.card.card_id,
-    confidence,
-    clarifyQuestion: null,
-    summary: question,
-    usedLlm: false,
-  };
+  const candidates = await rankEnhancedCardCandidates(question);
+  return buildEnhancedClassification(question, candidates);
 }
 
 export function resolveCardFromClassification(
@@ -168,4 +246,8 @@ export function resolveCardFromClassification(
     return null;
   }
   return getCardById(classification.cardId) ?? null;
+}
+
+export async function rankCandidatesForQuestion(question: string): Promise<ScoredCardCandidate[]> {
+  return rankEnhancedCardCandidates(question);
 }

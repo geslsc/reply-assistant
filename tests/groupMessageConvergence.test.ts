@@ -174,17 +174,17 @@ describe('Group message convergence and semantic routing', () => {
     setLlmClient(mockLlm);
 
     const result = await processMessage(groupMsg(TEST_CUSTOMER, '這個怎麼用'));
-    expect(result.replies.find((r) => r.type === 'group')?.text).toBe(
-      '您是想問哪個功能呢？例如計次券、會員、或預約結帳？'
-    );
+    const groupText = result.replies.find((r) => r.type === 'group')?.text ?? '';
+    expect(groupText).toContain('哪個功能');
+    expect(groupText).toContain('選項編號');
     expect((await getActiveIssueThread(TEST_GROUP))?.state).toBe(ThreadState.AI_CLARIFYING);
   });
 
-  it('handoffs after two clarify rounds still unclear', async () => {
+  it('handoffs after three clarify rounds still unclear', async () => {
     const thread = await getRepos().threads.create(TEST_GROUP, '這個怎麼用');
     await getRepos().threads.update(TEST_GROUP, thread.issueThreadId, {
       state: ThreadState.AI_CLARIFYING,
-      clarifyRound: 2,
+      clarifyRound: 3,
     });
 
     const mockLlm: LlmClient = {
