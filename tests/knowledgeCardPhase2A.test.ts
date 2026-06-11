@@ -22,9 +22,10 @@ import {
 import { registerAdmin, registerInviteCode, requestConsultantJoin, approveConsultant } from '../src/services/consultantWhitelist';
 import { KnowledgeCard } from '../src/schemas/knowledgeCardSchema';
 import { TEST_ADMIN, TEST_CONSULTANT } from './helpers/testSetup';
+import { withEnhancedKnowledgeFields } from './helpers/knowledgeCardTestFixtures';
 import { setLlmClient, INSUFFICIENT_DRAFT_INPUT_MESSAGE } from '../src/services/knowledgeCardDraftService';
 
-const sampleCard: KnowledgeCard = {
+const sampleCard: KnowledgeCard = withEnhancedKnowledgeFields({
   card_id: 'phase2a-card',
   title: '登入問題',
   patterns: ['怎麼登入'],
@@ -34,7 +35,7 @@ const sampleCard: KnowledgeCard = {
   not_applicable: [],
   escalate_to_consultant: [],
   status: '可用',
-};
+});
 
 async function setupRoles(): Promise<void> {
   await registerAdmin(TEST_ADMIN, 'Admin');
@@ -163,8 +164,7 @@ describe('Knowledge card Phase 2-A', () => {
           card_id: '__pending__',
           title: '儲值卡設定常見問題',
           patterns: [],
-          risk_level: 'low',
-          can_public_reply: false,
+          risk_level: 'mid',
           standard_answer: '請至設定中的票券管理新增儲值卡。',
           not_applicable: [],
           escalate_to_consultant: [],
@@ -205,8 +205,8 @@ describe('Knowledge card Phase 2-A', () => {
 
   it('admin confirm marks pending review approved', async () => {
     await storeUserDraft(TEST_CONSULTANT, sampleCard, JSON.stringify(sampleCard), 'draft text');
-    const submitReplies = await handleConsultantConfirmSubmit(TEST_CONSULTANT);
-    const shortCode = submitReplies.find((r) => r.userId === TEST_ADMIN)?.text?.match(/K-\d{8}-[A-Z0-9]{2,}/)?.[0];
+    await handleConsultantConfirmSubmit(TEST_CONSULTANT);
+    const shortCode = (await getRepos().pendingKnowledgeReviews.listPending())[0]?.reviewId;
     expect(shortCode).toBeDefined();
     await handleConfirmUpdate({ userId: TEST_ADMIN, text: `確認更新 ${shortCode}` });
     const record = await getRepos().pendingKnowledgeReviews.findById(shortCode!);
@@ -218,8 +218,8 @@ describe('Knowledge card Phase 2-A', () => {
 
   it('admin reject marks pending review rejected', async () => {
     await storeUserDraft(TEST_CONSULTANT, sampleCard, JSON.stringify(sampleCard), 'draft text');
-    const submitReplies = await handleConsultantConfirmSubmit(TEST_CONSULTANT);
-    const shortCode = submitReplies.find((r) => r.userId === TEST_ADMIN)?.text?.match(/K-\d{8}-[A-Z0-9]{2,}/)?.[0];
+    await handleConsultantConfirmSubmit(TEST_CONSULTANT);
+    const shortCode = (await getRepos().pendingKnowledgeReviews.listPending())[0]?.reviewId;
     await handleAdminRejectDraft({ userId: TEST_ADMIN, text: `退回 ${shortCode}` });
     const record = await getRepos().pendingKnowledgeReviews.findById(shortCode!);
     expect(record?.status).toBe('rejected');

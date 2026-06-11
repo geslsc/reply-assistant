@@ -1,3 +1,4 @@
+import { loadEnv, resetEnvCache } from '../src/config/env';
 import { EventType } from '../src/types';
 import { processMessage } from '../src/handlers/lineWebhookHandler';
 import { setPendingConfirmation } from '../src/services/consultantConfirmationService';
@@ -36,6 +37,8 @@ function privateMsg(userId: string, text: string) {
 
 describe('Private message handler entry order', () => {
   beforeEach(async () => {
+    resetEnvCache();
+    loadEnv({ USE_MEMORY_REPOS: true, ENABLE_GROUP_PROXY_REPLY: false });
     await resetTestState();
     setLlmClient(null);
   });
@@ -53,7 +56,7 @@ describe('Private message handler entry order', () => {
     expect(result.replies[0].text).toContain('AI 草稿整理尚未啟用');
   });
 
-  it('active admin private reply-to-group enters confirmation flow', async () => {
+  it('active admin private reply-to-group is not available when proxy disabled', async () => {
     await registerAdmin(TEST_ADMIN);
     await handleServiceIntroduction(TEST_GROUP, TEST_ADMIN);
     const thread = await createIssueThread(TEST_GROUP, 'Q');
@@ -67,11 +70,13 @@ describe('Private message handler entry order', () => {
     });
 
     const result = await privateMsg(TEST_ADMIN, '代回群組：逐字內容');
-    expect(result.replies[0].text).toContain('確認代回');
+    expect(result.replies[0].text).not.toContain('確認代回');
     expect(result.replies[0].text).not.toContain('您的 LINE userId');
   });
 
-  it('active admin confirm reply executes REPLY_TO_GROUP via pushMessage', async () => {
+  it('active admin confirm reply executes REPLY_TO_GROUP via pushMessage when enabled', async () => {
+    resetEnvCache();
+    loadEnv({ USE_MEMORY_REPOS: true, ENABLE_GROUP_PROXY_REPLY: true });
     await registerAdmin(TEST_ADMIN);
     await handleServiceIntroduction(TEST_GROUP, TEST_ADMIN);
     const thread = await createIssueThread(TEST_GROUP, 'Q');
@@ -120,7 +125,7 @@ describe('Private message handler entry order', () => {
     expect(result.replies[0].text).toContain('店家問題：');
   });
 
-  it('active consultant private reply-to-group enters confirmation flow', async () => {
+  it('active consultant private reply-to-group is not available when proxy disabled', async () => {
     await setupActiveConsultant();
     await handleServiceIntroduction(TEST_GROUP, TEST_CONSULTANT);
     const thread = await createIssueThread(TEST_GROUP, 'Q');
@@ -134,7 +139,7 @@ describe('Private message handler entry order', () => {
     });
 
     const result = await privateMsg(TEST_CONSULTANT, '代回群組：測試');
-    expect(result.replies[0].text).toContain('確認代回');
+    expect(result.replies[0].text).not.toContain('確認代回');
   });
 
   it('identity query returns role status and capabilities', async () => {
@@ -143,7 +148,7 @@ describe('Private message handler entry order', () => {
     expect(result.replies[0].text).toContain(`LINE userId: ${TEST_ADMIN}`);
     expect(result.replies[0].text).toContain('role: admin');
     expect(result.replies[0].text).toContain('status: active');
-    expect(result.replies[0].text).toContain('代回群組：是');
+    expect(result.replies[0].text).toContain('待辦處理：是');
     expect(result.replies[0].text).toContain('AI 草稿整理：是');
   });
 
@@ -164,8 +169,8 @@ describe('Private message handler entry order', () => {
     const draft = await privateMsg(TEST_CUSTOMER, '整理知識卡：測試問題');
     expect(draft.replies[0].text).toContain('不可使用');
 
-    const reply = await privateMsg(TEST_CUSTOMER, '代回群組：xxx');
-    expect(reply.replies[0].text).toContain('不可使用');
+    const pause = await privateMsg(TEST_CUSTOMER, '這篇要改');
+    expect(pause.replies[0].text).toContain('不可使用');
 
     const confirm = await privateMsg(TEST_CUSTOMER, '確認代回');
     expect(confirm.replies[0].text).toContain('不可使用');

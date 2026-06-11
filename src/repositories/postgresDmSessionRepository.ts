@@ -6,6 +6,7 @@ import {
   DmSessionRepository,
 } from './dmSessionTypes';
 import { KnowledgeCard } from '../schemas/knowledgeCardSchema';
+import { draftDataToKnowledgeCard } from '../services/knowledgeCardDraftMappingService';
 import { mapDmSessionRow } from './memoryDmSessionRepository';
 
 function mapRow(row: Record<string, unknown>): DmSessionRecord {
@@ -120,13 +121,17 @@ export function createPostgresDmSessionRepository(pool: Pool): DmSessionReposito
         if (!active) {
           throw new Error('NO_ACTIVE_SESSION');
         }
+        const cardData = params.draftData
+          ? draftDataToKnowledgeCard(params.draftData)
+          : params.cardData;
         await client.query(
           `INSERT INTO pending_knowledge_reviews (
-            review_id, card_data, submitted_by, submitted_at, status
-          ) VALUES ($1, $2::jsonb, $3, $4, 'pending')`,
+            review_id, card_data, draft_data, submitted_by, submitted_at, status
+          ) VALUES ($1, $2::jsonb, $3::jsonb, $4, $5, 'pending')`,
           [
             params.reviewId,
-            JSON.stringify(params.cardData),
+            JSON.stringify(cardData),
+            JSON.stringify(params.draftData ?? cardData),
             params.userId,
             params.submittedAt,
           ]

@@ -170,7 +170,8 @@ CREATE TABLE IF NOT EXISTS pending_handoffs (
   issue_thread_id TEXT NOT NULL,
   group_id TEXT NOT NULL,
   short_code TEXT NOT NULL,
-  status TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  -- legacy/deprecated：僅供舊資料相容；新流程請使用 reason，勿再寫入 invalid_reason
   invalid_reason TEXT,
   customer_question TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -178,8 +179,11 @@ CREATE TABLE IF NOT EXISTS pending_handoffs (
   closed_at TIMESTAMPTZ,
   snoozed BOOLEAN NOT NULL DEFAULT FALSE,
   acknowledged_at TIMESTAMPTZ,
+  status_updated_by TEXT,
+  status_updated_at TIMESTAMPTZ,
+  reason TEXT,
   CONSTRAINT pending_handoffs_status_check CHECK (
-    status IN ('open', 'closed', 'invalid')
+    status IN ('pending', 'in_progress', 'resolved', 'ignored')
   ),
   CONSTRAINT pending_handoffs_invalid_reason_check CHECK (
     invalid_reason IS NULL OR invalid_reason IN (
@@ -216,6 +220,13 @@ CREATE TABLE IF NOT EXISTS knowledge_cards (
   updated_at TIMESTAMPTZ,
   confirmed_by TEXT NOT NULL,
   confirmed_at TIMESTAMPTZ NOT NULL,
+  core_question TEXT,
+  match_features JSONB,
+  applicability_rules JSONB,
+  exclusion_rules JSONB,
+  reasoning TEXT,
+  handoff_conditions JSONB,
+  source_consultant_input JSONB,
   CONSTRAINT knowledge_cards_risk_level_check CHECK (
     risk_level IN ('low', 'mid', 'high', 'unknown')
   ),
@@ -226,6 +237,15 @@ CREATE TABLE IF NOT EXISTS knowledge_cards (
 
 CREATE INDEX IF NOT EXISTS idx_knowledge_cards_status ON knowledge_cards(status);
 CREATE INDEX IF NOT EXISTS idx_knowledge_cards_risk_level ON knowledge_cards(risk_level);
+
+-- knowledge_cards 欄位強化（2026-06-11）
+ALTER TABLE knowledge_cards ADD COLUMN IF NOT EXISTS core_question TEXT;
+ALTER TABLE knowledge_cards ADD COLUMN IF NOT EXISTS match_features JSONB;
+ALTER TABLE knowledge_cards ADD COLUMN IF NOT EXISTS applicability_rules JSONB;
+ALTER TABLE knowledge_cards ADD COLUMN IF NOT EXISTS exclusion_rules JSONB;
+ALTER TABLE knowledge_cards ADD COLUMN IF NOT EXISTS reasoning TEXT;
+ALTER TABLE knowledge_cards ADD COLUMN IF NOT EXISTS handoff_conditions JSONB;
+ALTER TABLE knowledge_cards ADD COLUMN IF NOT EXISTS source_consultant_input JSONB;
 
 CREATE TABLE IF NOT EXISTS invite_codes (
   code TEXT PRIMARY KEY,
@@ -253,6 +273,10 @@ CREATE TABLE IF NOT EXISTS pending_knowledge_reviews (
   admin_response TEXT,
   resolved_at TIMESTAMPTZ,
   resolved_by TEXT,
+  last_edited_by TEXT,
+  last_edited_at TIMESTAMPTZ,
+  edit_reason TEXT,
+  draft_data JSONB,
   CONSTRAINT pending_knowledge_reviews_status_check CHECK (
     status IN ('pending', 'approved', 'rejected', 'expired')
   )
@@ -330,3 +354,48 @@ CREATE INDEX IF NOT EXISTS idx_group_consultant_assignments_secondary
   ON group_consultant_assignments(secondary_consultant_user_id);
 CREATE INDEX IF NOT EXISTS idx_group_consultant_assignments_group_code
   ON group_consultant_assignments(group_code);
+
+-- pending_handoffs 狀態擴充（低用量待辦查詢型）
+ALTER TABLE pending_handoffs ADD COLUMN IF NOT EXISTS status_updated_by TEXT;
+ALTER TABLE pending_handoffs ADD COLUMN IF NOT EXISTS status_updated_at TIMESTAMPTZ;
+ALTER TABLE pending_handoffs ADD COLUMN IF NOT EXISTS reason TEXT;
+ALTER TABLE pending_handoffs DROP CONSTRAINT IF EXISTS pending_handoffs_status_check;
+UPDATE pending_handoffs SET
+  status = 'pending',
+  status_updated_by = COALESCE(status_updated_by, 'migration'),
+  status_updated_at = COALESCE(status_updated_at, updated_at, NOW())
+WHERE status = 'open';
+UPDATE pending_handoffs SET
+  status = 'resolved',
+  status_updated_by = COALESCE(status_updated_by, 'migration'),
+  status_updated_at = COALESCE(status_updated_at, updated_at, NOW())
+WHERE status = 'closed';
+UPDATE pending_handoffs SET
+  status = 'ignored',
+  status_updated_by = COALESCE(status_updated_by, 'migration'),
+  status_updated_at = COALESCE(status_updated_at, updated_at, NOW())
+WHERE status = 'invalid';
+UPDATE pending_handoffs SET reason = invalid_reason WHERE status = 'ignored' AND reason IS NULL AND invalid_reason IS NOT NULL;
+UPDATE pending_handoffs SET
+  status_updated_by = COALESCE(status_updated_by, 'migration'),
+  status_updated_at = COALESCE(status_updated_at, updated_at, NOW())
+WHERE status_updated_by IS NULL OR status_updated_at IS NULL;
+ALTER TABLE pending_handoffs ADD CONSTRAINT pending_handoffs_status_check CHECK (
+  status IN ('pending', 'in_progress', 'resolved', 'ignored')
+);
+COMMENT ON COLUMN pending_handoffs.invalid_reason IS 'legacy/deprecated: 僅供舊資料相容；新流程請使用 reason';
+
+-- pending_knowledge_reviews admin 改草稿追蹤
+ALTER TABLE pending_knowledge_reviews ADD COLUMN IF NOT EXISTS last_edited_by TEXT;
+ALTER TABLE pending_knowledge_reviews ADD COLUMN IF NOT EXISTS last_edited_at TIMESTAMPTZ;
+ALTER TABLE pending_knowledge_reviews ADD COLUMN IF NOT EXISTS edit_reason TEXT;
+ALTER TABLE pending_knowledge_reviews ADD COLUMN IF NOT EXISTS draft_data JSONB;
+
+-- push_usage_logs：未來預留，本批次不啟用推播
+CREATE TABLE IF NOT EXISTS push_usage_logs (
+  id SERIAL PRIMARY KEY,
+  push_type TEXT NOT NULL,
+  recipient_id TEXT NOT NULL,
+  context_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

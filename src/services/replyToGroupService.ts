@@ -124,10 +124,13 @@ async function resolveTargetHandoff(
     }
     const all = await getPendingHandoffs(consultantId);
     const invalid = all.find(
-      (h) => h.shortCode === options.shortCode && h.status === PendingHandoffStatus.INVALID
+      (h) => h.shortCode === options.shortCode && h.status === PendingHandoffStatus.IGNORED
     );
     if (invalid) {
-      return { handoff: null, error: mapInvalidReason(invalid.invalidReason) };
+      return {
+        handoff: null,
+        error: mapInvalidReason((invalid.reason as PendingHandoffInvalidReason | null) ?? null),
+      };
     }
     return {
       handoff: null,

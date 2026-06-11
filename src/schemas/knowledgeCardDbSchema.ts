@@ -1,4 +1,5 @@
 import { KnowledgeCard, KnowledgeCardStatus } from './knowledgeCardSchema';
+import { SourceConsultantInput } from './knowledgeCardDraftSchema';
 import { RiskLevel } from '../types';
 
 export type DbKnowledgeCardStatus = 'active' | 'paused';
@@ -19,6 +20,13 @@ export interface DbKnowledgeCardRecord {
   updatedAt: string | null;
   confirmedBy: string;
   confirmedAt: string;
+  coreQuestion: string | null;
+  matchFeatures: string[] | null;
+  applicabilityRules: string[] | null;
+  exclusionRules: string[] | null;
+  reasoning: string | null;
+  handoffConditions: string[] | null;
+  sourceConsultantInput: SourceConsultantInput | null;
 }
 
 export const TRACKING_FIELDS = [
@@ -38,6 +46,31 @@ export function dbStatusToApp(status: DbKnowledgeCardStatus): KnowledgeCardStatu
   return status === 'active' ? '可用' : '暫停';
 }
 
+function parseStringArray(value: unknown): string[] | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === 'string');
+  }
+  return null;
+}
+
+function parseSourceInput(value: unknown): SourceConsultantInput | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const obj = value as Record<string, unknown>;
+  if (typeof obj.customer_question !== 'string' || typeof obj.consultant_reply !== 'string') {
+    return null;
+  }
+  return {
+    customer_question: obj.customer_question,
+    consultant_reply: obj.consultant_reply,
+    raw_input: typeof obj.raw_input === 'string' ? obj.raw_input : undefined,
+  };
+}
+
 export function dbRecordToKnowledgeCard(record: DbKnowledgeCardRecord): KnowledgeCard {
   return {
     card_id: record.cardId,
@@ -49,6 +82,13 @@ export function dbRecordToKnowledgeCard(record: DbKnowledgeCardRecord): Knowledg
     not_applicable: record.notApplicable,
     escalate_to_consultant: record.escalateToConsultant,
     status: dbStatusToApp(record.status),
+    core_question: record.coreQuestion,
+    match_features: record.matchFeatures,
+    applicability_rules: record.applicabilityRules,
+    exclusion_rules: record.exclusionRules,
+    reasoning: record.reasoning,
+    handoff_conditions: record.handoffConditions,
+    source_consultant_input: record.sourceConsultantInput,
   };
 }
 
@@ -65,6 +105,13 @@ export function knowledgeCardToDbFields(
   | 'notApplicable'
   | 'escalateToConsultant'
   | 'status'
+  | 'coreQuestion'
+  | 'matchFeatures'
+  | 'applicabilityRules'
+  | 'exclusionRules'
+  | 'reasoning'
+  | 'handoffConditions'
+  | 'sourceConsultantInput'
 > {
   return {
     cardId: card.card_id,
@@ -76,6 +123,40 @@ export function knowledgeCardToDbFields(
     notApplicable: card.not_applicable,
     escalateToConsultant: card.escalate_to_consultant,
     status: appStatusToDb(card.status),
+    coreQuestion: card.core_question ?? null,
+    matchFeatures: card.match_features ?? null,
+    applicabilityRules: card.applicability_rules ?? null,
+    exclusionRules: card.exclusion_rules ?? null,
+    reasoning: card.reasoning ?? null,
+    handoffConditions: card.handoff_conditions ?? null,
+    sourceConsultantInput: card.source_consultant_input ?? null,
+  };
+}
+
+export function mapDbRowToRecord(row: Record<string, unknown>): DbKnowledgeCardRecord {
+  return {
+    cardId: String(row.card_id),
+    title: String(row.title),
+    patterns: (row.patterns as string[]) ?? [],
+    riskLevel: row.risk_level as RiskLevel,
+    canPublicReply: Boolean(row.can_public_reply),
+    standardAnswer: String(row.standard_answer),
+    notApplicable: (row.not_applicable as string[]) ?? [],
+    escalateToConsultant: (row.escalate_to_consultant as string[]) ?? [],
+    status: row.status as DbKnowledgeCardStatus,
+    createdBy: String(row.created_by),
+    createdAt: new Date(row.created_at as string | Date).toISOString(),
+    updatedBy: row.updated_by ? String(row.updated_by) : null,
+    updatedAt: row.updated_at ? new Date(row.updated_at as string | Date).toISOString() : null,
+    confirmedBy: String(row.confirmed_by),
+    confirmedAt: new Date(row.confirmed_at as string | Date).toISOString(),
+    coreQuestion: row.core_question ? String(row.core_question) : null,
+    matchFeatures: parseStringArray(row.match_features),
+    applicabilityRules: parseStringArray(row.applicability_rules),
+    exclusionRules: parseStringArray(row.exclusion_rules),
+    reasoning: row.reasoning ? String(row.reasoning) : null,
+    handoffConditions: parseStringArray(row.handoff_conditions),
+    sourceConsultantInput: parseSourceInput(row.source_consultant_input),
   };
 }
 
@@ -90,6 +171,13 @@ export function dbRecordToExportJson(record: DbKnowledgeCardRecord): Record<stri
     not_applicable: record.notApplicable,
     escalate_to_consultant: record.escalateToConsultant,
     status: record.status,
+    core_question: record.coreQuestion,
+    match_features: record.matchFeatures,
+    applicability_rules: record.applicabilityRules,
+    exclusion_rules: record.exclusionRules,
+    reasoning: record.reasoning,
+    handoff_conditions: record.handoffConditions,
+    source_consultant_input: record.sourceConsultantInput,
     created_by: record.createdBy,
     created_at: record.createdAt,
     updated_by: record.updatedBy,

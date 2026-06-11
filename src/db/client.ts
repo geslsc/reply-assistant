@@ -62,6 +62,7 @@ export async function dropAllTables(pool?: Pool): Promise<void> {
     DROP TABLE IF EXISTS pending_knowledge_reviews CASCADE;
     DROP TABLE IF EXISTS pending_handoffs CASCADE;
     DROP TABLE IF EXISTS consultant_applications CASCADE;
+    DROP TABLE IF EXISTS push_usage_logs CASCADE;
     DROP TABLE IF EXISTS group_consultant_assignments CASCADE;
     DROP TABLE IF EXISTS knowledge_cards CASCADE;
     DROP TABLE IF EXISTS knowledge_overrides CASCADE;

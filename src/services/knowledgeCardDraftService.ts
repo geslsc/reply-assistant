@@ -2,6 +2,9 @@ import {
   KNOWLEDGE_CARD_LLM_SYSTEM_PROMPT,
   KnowledgeCard,
 } from '../schemas/knowledgeCardSchema';
+import {
+  SourceConsultantInput,
+} from '../schemas/knowledgeCardDraftSchema';
 import { RiskLevel } from '../types';
 import { DmSessionDraftData, PublicReplyPreference } from '../repositories/dmSessionTypes';
 import { cardContainsSensitiveContent, enforceKnowledgeCardRules, ValidationResult } from './knowledgeCardValidator';
@@ -173,6 +176,30 @@ function inferTitleFromPatterns(patterns: string[]): string {
   return `${first}常見問題`;
 }
 
+function inferSourceConsultantInput(
+  rawCard: Partial<KnowledgeCard>,
+  consultantRequest: string
+): SourceConsultantInput {
+  if (rawCard.source_consultant_input) {
+    return rawCard.source_consultant_input;
+  }
+  const explicitQuestions = extractLinesAfterLabel(consultantRequest, /(店家問題|店家常問|可能會問|問題範例)/u);
+  const explicitReply = extractLinesAfterLabel(consultantRequest, /(建議回覆|我的回覆|回答|解法)/u).join('\n');
+  const customerQuestion =
+    explicitQuestions[0] ??
+    rawCard.core_question ??
+    rawCard.patterns?.[0] ??
+    consultantRequest.trim();
+  const consultantReply =
+    explicitReply ||
+    (typeof rawCard.standard_answer === 'string' ? rawCard.standard_answer : consultantRequest.trim());
+  return {
+    customer_question: customerQuestion.trim(),
+    consultant_reply: consultantReply.trim(),
+    raw_input: consultantRequest.trim(),
+  };
+}
+
 function repairDraftCardStructure(
   rawCard: Partial<KnowledgeCard>,
   consultantRequest: string
@@ -186,9 +213,31 @@ function repairDraftCardStructure(
     repaired.patterns = inferPatternsFromRequest(consultantRequest);
   }
 
+  if (typeof repaired.core_question !== 'string' || repaired.core_question.trim() === '') {
+    repaired.core_question = repaired.patterns?.[0] ?? consultantRequest.trim();
+  }
+
   if (typeof repaired.title !== 'string' || repaired.title.trim() === '') {
     repaired.title = inferTitleFromPatterns(repaired.patterns ?? []);
   }
+
+  if (!Array.isArray(repaired.match_features)) {
+    repaired.match_features = [];
+  }
+  if (!Array.isArray(repaired.applicability_rules)) {
+    repaired.applicability_rules = [];
+  }
+  if (!Array.isArray(repaired.exclusion_rules)) {
+    repaired.exclusion_rules = [];
+  }
+  if (!Array.isArray(repaired.handoff_conditions)) {
+    repaired.handoff_conditions = [];
+  }
+  if (repaired.reasoning === undefined) {
+    repaired.reasoning = null;
+  }
+
+  repaired.source_consultant_input = inferSourceConsultantInput(repaired, consultantRequest);
 
   if (!Array.isArray(repaired.not_applicable)) {
     repaired.not_applicable = [];
@@ -399,6 +448,9 @@ export function formatHumanReadableKnowledgeCard(
     '',
     '主題：',
     card.title,
+    '',
+    '核心問題：',
+    card.core_question ?? card.title,
     '',
     '店家可能會這樣問：',
     ...card.patterns.map((pattern) => `- ${pattern}`),

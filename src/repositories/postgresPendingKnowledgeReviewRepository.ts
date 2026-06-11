@@ -5,17 +5,26 @@ import {
   PendingKnowledgeReviewStatus,
 } from './pendingKnowledgeReviewTypes';
 import { mapPendingKnowledgeReviewRow } from './memoryPendingKnowledgeReviewRepository';
+import { draftDataToKnowledgeCard } from '../services/knowledgeCardDraftMappingService';
 
 export function createPostgresPendingKnowledgeReviewRepository(
   pool: Pool
 ): PendingKnowledgeReviewRepository {
   return {
     async insert(params: InsertPendingKnowledgeReviewParams) {
+      const draftData = params.draftData ?? null;
+      const cardData = draftData ? draftDataToKnowledgeCard(draftData) : params.cardData;
       await pool.query(
         `INSERT INTO pending_knowledge_reviews (
-          review_id, card_data, submitted_by, submitted_at, status
-        ) VALUES ($1, $2::jsonb, $3, $4, 'pending')`,
-        [params.reviewId, JSON.stringify(params.cardData), params.submittedBy, params.submittedAt]
+          review_id, card_data, draft_data, submitted_by, submitted_at, status
+        ) VALUES ($1, $2::jsonb, $3::jsonb, $4, $5, 'pending')`,
+        [
+          params.reviewId,
+          JSON.stringify(cardData),
+          JSON.stringify(draftData ?? cardData),
+          params.submittedBy,
+          params.submittedAt,
+        ]
       );
       const result = await pool.query('SELECT * FROM pending_knowledge_reviews WHERE review_id = $1', [
         params.reviewId,
@@ -62,6 +71,25 @@ export function createPostgresPendingKnowledgeReviewRepository(
         `UPDATE pending_knowledge_reviews SET admin_response = $2 WHERE review_id = $1`,
         [reviewId, adminResponse]
       );
+    },
+
+    async updateDraftData(params) {
+      const cardData = draftDataToKnowledgeCard(params.draftData);
+      await pool.query(
+        `UPDATE pending_knowledge_reviews
+         SET draft_data = $2::jsonb, card_data = $3::jsonb,
+             last_edited_by = $4, last_edited_at = $5, edit_reason = $6
+         WHERE review_id = $1 AND status = 'pending'`,
+        [
+          params.reviewId,
+          JSON.stringify(params.draftData),
+          JSON.stringify(cardData),
+          params.lastEditedBy,
+          params.lastEditedAt,
+          params.editReason ?? null,
+        ]
+      );
+      return this.findById(params.reviewId);
     },
 
     async markApproved(reviewId, resolvedBy, resolvedAt) {

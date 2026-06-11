@@ -35,7 +35,7 @@ describe('LINE Reply / Push Tests', () => {
     expect(result.replies.some((r) => r.type === 'group')).toBe(true);
   });
 
-  it('uses pushMessage for consultant handoff', async () => {
+  it('does not push consultant handoff notifications from group replies', async () => {
     const replyText = jest.fn().mockResolvedValue(undefined);
     const pushText = jest.fn().mockResolvedValue(null);
     setLineMessageClient({ replyText, pushText });
@@ -54,8 +54,8 @@ describe('LINE Reply / Push Tests', () => {
     });
     await deliverBotReplies(result.replies, 'reply-token');
 
-    expect(pushText).toHaveBeenCalled();
-    expect(result.replies.some((r) => r.type === 'push')).toBe(true);
+    expect(pushText).not.toHaveBeenCalled();
+    expect(result.replies.some((r) => r.type === 'push')).toBe(false);
   });
 
   it('notifies admin after consultant join pending', async () => {
@@ -249,7 +249,7 @@ describe('LINE Reply / Push Tests', () => {
       expect.stringContaining('查看待處理問題')
     );
     expect(replyText).not.toHaveBeenCalledWith('reply-token', expect.stringContaining('私訊'));
-    expect(pushText).toHaveBeenCalledWith(TEST_ADMIN, expect.stringContaining('【問題收斂卡】'));
+    expect(pushText).not.toHaveBeenCalled();
     expect(await getRepos().pendingHandoffs.findOpenByConsultant(TEST_ADMIN)).toHaveLength(1);
 
     const fallback = await handleViewPendingHandoffs(TEST_ADMIN);

@@ -2,6 +2,7 @@ import { RiskLevel } from '../types';
 import {
   DbKnowledgeCardRecord,
   DbKnowledgeCardStatus,
+  mapDbRowToRecord,
 } from '../schemas/knowledgeCardDbSchema';
 import {
   KnowledgeCardInsertParams,
@@ -27,6 +28,13 @@ function rowFromParams(params: KnowledgeCardInsertParams): DbKnowledgeCardRecord
     updatedAt: params.updatedAt ?? null,
     confirmedBy: params.confirmedBy,
     confirmedAt: params.confirmedAt,
+    coreQuestion: params.coreQuestion ?? null,
+    matchFeatures: params.matchFeatures ?? null,
+    applicabilityRules: params.applicabilityRules ?? null,
+    exclusionRules: params.exclusionRules ?? null,
+    reasoning: params.reasoning ?? null,
+    handoffConditions: params.handoffConditions ?? null,
+    sourceConsultantInput: params.sourceConsultantInput ?? null,
   };
 }
 
@@ -74,6 +82,13 @@ export function createMemoryKnowledgeCardRepository(): KnowledgeCardRepository {
         updatedAt: params.updatedAt,
         confirmedBy: params.confirmedBy,
         confirmedAt: params.confirmedAt,
+        coreQuestion: params.coreQuestion ?? null,
+        matchFeatures: params.matchFeatures ?? null,
+        applicabilityRules: params.applicabilityRules ?? null,
+        exclusionRules: params.exclusionRules ?? null,
+        reasoning: params.reasoning ?? null,
+        handoffConditions: params.handoffConditions ?? null,
+        sourceConsultantInput: params.sourceConsultantInput ?? null,
       };
       cards.set(cardId, updated);
       return { ...updated, patterns: [...updated.patterns] };
@@ -104,21 +119,5 @@ export function createMemoryKnowledgeCardRepository(): KnowledgeCardRepository {
 }
 
 export function mapPgRowToRecord(row: Record<string, unknown>): DbKnowledgeCardRecord {
-  return {
-    cardId: String(row.card_id),
-    title: String(row.title),
-    patterns: (row.patterns as string[]) ?? [],
-    riskLevel: row.risk_level as RiskLevel,
-    canPublicReply: Boolean(row.can_public_reply),
-    standardAnswer: String(row.standard_answer),
-    notApplicable: (row.not_applicable as string[]) ?? [],
-    escalateToConsultant: (row.escalate_to_consultant as string[]) ?? [],
-    status: row.status as DbKnowledgeCardStatus,
-    createdBy: String(row.created_by),
-    createdAt: new Date(row.created_at as string | Date).toISOString(),
-    updatedBy: row.updated_by ? String(row.updated_by) : null,
-    updatedAt: row.updated_at ? new Date(row.updated_at as string | Date).toISOString() : null,
-    confirmedBy: String(row.confirmed_by),
-    confirmedAt: new Date(row.confirmed_at as string | Date).toISOString(),
-  };
+  return mapDbRowToRecord(row);
 }

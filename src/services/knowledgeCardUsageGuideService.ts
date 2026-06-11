@@ -20,9 +20,9 @@ export const ADMIN_USAGE_GUIDE = `【小助手使用說明｜Admin】
 4. 確認更新 K-xxxxxxxx-xx
 5. 退回 K-xxxxxxxx-xx
 6. 查看待處理問題
-7. Q-xxxxxxxx-xx 回覆：……
-8. 查詢群組列表
-9. 查詢服務期 [群組名稱或 G-xx]
+7. 查詢群組列表
+8. 查詢服務期 [群組名稱或 G-xx]
+9. 編輯草稿 K-xxxxxxxx-xx（admin）
 10. 匯出所有知識卡
 
 整理知識卡：
@@ -42,7 +42,7 @@ export const ADMIN_USAGE_GUIDE = `【小助手使用說明｜Admin】
 - 小助手使用說明
 
 想看某類操作，直接輸入：
-知識卡 / 群組 / 服務期 / 待處理 / 代回 / 匯出 / 確認
+知識卡 / 群組 / 服務期 / 待處理 / 匯出 / 確認
 
 提醒：Admin 用「確認更新」正式上線；顧問送出的草稿仍需 Admin 確認。`;
 
@@ -54,7 +54,7 @@ export const CONSULTANT_USAGE_GUIDE = `【小助手使用說明｜顧問】
 3. 查詢知識卡 [關鍵字]
 4. 確認送出
 5. 查看待處理問題
-6. 代回群組：Q-xxxxxxxx-xx 回覆：……
+6. 查看待處理問題
 7. 建議暫停 [card_id 或編號]
 8. 取消 / 停止整理 / 先不用
 
@@ -74,7 +74,7 @@ export const CONSULTANT_USAGE_GUIDE = `【小助手使用說明｜顧問】
 - 小助手使用說明
 
 想看某類操作，直接輸入：
-知識卡 / 待處理 / 代回 / 確認 / 群組
+知識卡 / 待處理 / 確認 / 群組
 
 提醒：顧問用「確認送出」，草稿送給 Admin 後才會正式上線。`;
 

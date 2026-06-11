@@ -280,8 +280,8 @@ describe('Pending Handoffs and Reply To Group', () => {
 
     await handleConsultantMute(TEST_GROUP, TEST_CONSULTANT, true);
     const afterMute = await getPendingHandoffs(TEST_CONSULTANT);
-    expect(afterMute.find((h) => h.id === handoff.id)?.status).toBe(PendingHandoffStatus.INVALID);
-    expect(afterMute.find((h) => h.id === handoff.id)?.invalidReason).toBe(
+    expect(afterMute.find((h) => h.id === handoff.id)?.status).toBe(PendingHandoffStatus.IGNORED);
+    expect(afterMute.find((h) => h.id === handoff.id)?.reason).toBe(
       PendingHandoffInvalidReason.GROUP_MUTED
     );
 
@@ -299,7 +299,7 @@ describe('Pending Handoffs and Reply To Group', () => {
     await settleGroupTimeouts(TEST_GROUP);
 
     const afterStale = await getPendingHandoffs(TEST_CONSULTANT);
-    expect(afterStale.find((h) => h.id === handoff2.id)?.status).toBe(PendingHandoffStatus.INVALID);
+    expect(afterStale.find((h) => h.id === handoff2.id)?.status).toBe(PendingHandoffStatus.IGNORED);
   });
 });
 

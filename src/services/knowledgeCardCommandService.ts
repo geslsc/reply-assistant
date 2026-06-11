@@ -13,8 +13,11 @@ import {
   handleSnoozeHandoff,
   isSnoozeHandoffPhrase,
 } from './pendingHandoffService';
+import { isRoundQuietPhrase } from './roundQuietService';
 import {
   handleAdminRejectDraft,
+  handleAdminEditDraft,
+  parseAdminEditDraftCommand,
   handleAdminRevisionFeedback,
   handleConsultantConfirmSubmit,
   handleConsultantConfirmUpdateAttempt,
@@ -27,6 +30,7 @@ import {
   handleResumeKnowledgeCard,
   parseResumeKnowledgeCardCommand,
 } from './knowledgeCardResumeService';
+import { handlePendingReviewQueryCommand } from './knowledgeCardPendingReviewQueryService';
 
 export interface KnowledgeCardCommandContext {
   userId: string;
@@ -38,6 +42,24 @@ export async function handleKnowledgeCardCommand(
   ctx: KnowledgeCardCommandContext
 ): Promise<BotReply[] | null> {
   const trimmed = ctx.text.trim();
+
+  const pendingReviewQuery = await handlePendingReviewQueryCommand(ctx.userId, trimmed);
+  if (pendingReviewQuery) {
+    return pendingReviewQuery;
+  }
+
+  if (isRoundQuietPhrase(trimmed)) {
+    if (!(await isActiveConsultantOrAdmin(ctx.userId))) {
+      return null;
+    }
+    return [
+      {
+        type: 'push',
+        userId: ctx.userId,
+        text: '「本輪安靜」請在群組內使用，且僅作用於當前進行中的問題 thread。',
+      },
+    ];
+  }
 
   if (isSnoozeHandoffPhrase(trimmed)) {
     if (!(await isActiveConsultantOrAdmin(ctx.userId))) {
@@ -61,6 +83,17 @@ export async function handleKnowledgeCardCommand(
 
   if (matchesConfirmUpdateCommand(trimmed)) {
     return handleConsultantConfirmUpdateAttempt({
+      userId: ctx.userId,
+      text: trimmed,
+      quotedMessageId: ctx.quotedMessageId,
+    });
+  }
+
+  if (parseAdminEditDraftCommand(trimmed)) {
+    if (!(await isActiveAdmin(ctx.userId))) {
+      return [{ type: 'push', userId: ctx.userId, text: '只有 active admin 可編輯待審草稿。' }];
+    }
+    return handleAdminEditDraft({
       userId: ctx.userId,
       text: trimmed,
       quotedMessageId: ctx.quotedMessageId,

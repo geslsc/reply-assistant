@@ -55,8 +55,9 @@ import {
 import { KnowledgeCard } from '../src/schemas/knowledgeCardSchema';
 import { PendingHandoffStatus } from '../src/repositories/pendingHandoffTypes';
 import { TEST_ADMIN, TEST_CONSULTANT, TEST_CUSTOMER, TEST_GROUP } from './helpers/testSetup';
+import { withEnhancedKnowledgeFields } from './helpers/knowledgeCardTestFixtures';
 
-const billingTutorialCard: KnowledgeCard = {
+const billingTutorialCard: KnowledgeCard = withEnhancedKnowledgeFields({
   card_id: 'stored-value-setup',
   title: '儲值卡設定',
   patterns: ['請問要怎麼儲值', '儲值卡要去哪裡設定'],
@@ -66,17 +67,18 @@ const billingTutorialCard: KnowledgeCard = {
   not_applicable: ['儲值金額錯誤', '扣抵異常'],
   escalate_to_consultant: ['金額、付款、餘額或帳務相關問題'],
   status: '可用',
-};
+});
 
-const invalidBillingCard = {
-  ...billingTutorialCard,
+const invalidBillingCard = withEnhancedKnowledgeFields({
   card_id: 'billing-invalid',
   title: '帳務問題',
   patterns: ['帳務異常怎麼看'],
   standard_answer: '請先對帳',
-};
+  risk_level: RiskLevel.LOW,
+  can_public_reply: true,
+});
 
-const quickCheckoutCard: KnowledgeCard = {
+const quickCheckoutCard: KnowledgeCard = withEnhancedKnowledgeFields({
   card_id: 'kc-20260609-002',
   title: '快速結帳功能常見問題',
   patterns: ['快速結帳功能在哪裡', '如何新增快速結帳單'],
@@ -86,9 +88,9 @@ const quickCheckoutCard: KnowledgeCard = {
   not_applicable: [],
   escalate_to_consultant: [],
   status: '可用',
-};
+});
 
-const regularCheckoutCard: KnowledgeCard = {
+const regularCheckoutCard: KnowledgeCard = withEnhancedKnowledgeFields({
   card_id: 'regular-checkout',
   title: '一般結帳流程',
   patterns: ['客人怎麼結帳', '如何完成結帳'],
@@ -98,7 +100,7 @@ const regularCheckoutCard: KnowledgeCard = {
   not_applicable: [],
   escalate_to_consultant: [],
   status: '可用',
-};
+});
 
 async function setupConsultant(): Promise<void> {
   await registerAdmin(TEST_ADMIN, 'Admin');
@@ -328,7 +330,7 @@ describe('UX fixes 2026-06-09 phase 2', () => {
 
       const open = await getOpenPendingHandoffs(TEST_CONSULTANT);
       expect(open).toHaveLength(1);
-      expect(open[0].status).toBe(PendingHandoffStatus.OPEN);
+      expect(open[0].status).toBe(PendingHandoffStatus.IN_PROGRESS);
       expect(open[0].snoozed).toBe(true);
     });
 
@@ -350,13 +352,15 @@ describe('UX fixes 2026-06-09 phase 2', () => {
       expect(text).toMatch(/Q-20260608-0200-B2/);
       expect(text).toMatch(/儲值卡設定問題/);
       expect(text).toMatch(/稍後處理/);
-      expect(text).toMatch(/指定短碼代回/);
+      expect(text).toMatch(/輸入短碼查看詳情/);
       expect(text).toMatch(/整理成知識卡草稿/);
     });
   });
 
   describe('reply-to-group confirmation and knowledge draft', () => {
     beforeEach(async () => {
+      resetEnvCache();
+      loadEnv({ USE_MEMORY_REPOS: true, ENABLE_GROUP_PROXY_REPLY: true });
       await handleServiceIntroduction(TEST_GROUP, TEST_CONSULTANT);
     });
 
@@ -373,11 +377,7 @@ describe('UX fixes 2026-06-09 phase 2', () => {
         text: 'Q-20260608-0300-C3 請試試重設密碼',
         isGroup: false,
       });
-      expect(replies?.[0].text).toMatch(/【代回群組確認】/);
-      expect(replies?.[0].text).toMatch(/問題短碼：Q-20260608-0300-C3/);
-      expect(replies?.[0].text).toMatch(/登入不了/);
-      expect(replies?.[0].text).toMatch(/請試試重設密碼/);
-      expect(replies?.[0].text).toMatch(/逐字轉貼/);
+      expect(replies).toBeNull();
     });
 
     it('REPLY_TO_GROUP sends verbatim text to group', async () => {
@@ -545,7 +545,7 @@ describe('UX fixes 2026-06-09 phase 2', () => {
         text: '對，幫我整理成知識卡',
       });
 
-      expect(replies?.[0].text).toMatch(/已送出草稿給 admin 審核/);
+      expect(replies?.[0].text).toMatch(/已送出草稿至待審區/);
       expect(await getRepos().dmSessions.findActiveByUserId(TEST_CONSULTANT)).toBeNull();
       expect(await getRepos().pendingKnowledgeReviews.listPending()).toHaveLength(1);
     });

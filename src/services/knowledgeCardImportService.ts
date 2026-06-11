@@ -44,16 +44,31 @@ function prepareImportRaw(raw: unknown): Record<string, unknown> | null {
   const cardId = String(obj.card_id ?? obj.id ?? '');
   const patterns = (obj.patterns ?? obj.common_questions ?? []) as string[];
   const riskLevel = (obj.risk_level ?? RiskLevel.LOW) as RiskLevel;
+  const title = String(obj.title ?? cardId);
+  const standardAnswer = String(obj.standard_answer ?? '');
+  const coreQuestion = String(obj.core_question ?? title ?? patterns[0] ?? cardId);
   return {
     card_id: cardId,
-    title: String(obj.title ?? cardId),
+    title,
     patterns,
     risk_level: riskLevel,
     can_public_reply: obj.can_public_reply ?? deriveCanPublicReply(riskLevel),
-    standard_answer: String(obj.standard_answer ?? ''),
+    standard_answer: standardAnswer,
     not_applicable: (obj.not_applicable ?? []) as string[],
     escalate_to_consultant: (obj.escalate_to_consultant ?? []) as string[],
     status: obj.status ?? '可用',
+    core_question: obj.core_question ?? coreQuestion,
+    match_features: (obj.match_features ?? []) as string[],
+    applicability_rules: (obj.applicability_rules ?? []) as string[],
+    exclusion_rules: (obj.exclusion_rules ?? []) as string[],
+    reasoning: typeof obj.reasoning === 'string' ? obj.reasoning : null,
+    handoff_conditions: (obj.handoff_conditions ?? []) as string[],
+    source_consultant_input:
+      obj.source_consultant_input ??
+      ({
+        customer_question: coreQuestion,
+        consultant_reply: standardAnswer,
+      } as Record<string, unknown>),
   };
 }
 
@@ -173,6 +188,7 @@ export async function executeBulkImport(adminUserId: string): Promise<BotReply[]
 
   let created = 0;
   let updated = 0;
+  const successes: string[] = [];
   const failures: Array<{ cardId: string; reason: string }> = [];
 
   for (const card of pending.cards) {
@@ -207,13 +223,15 @@ export async function executeBulkImport(adminUserId: string): Promise<BotReply[]
     } else {
       created += 1;
     }
+    successes.push(revalidated.normalized.card_id);
   }
 
   pendingImports.delete(adminUserId);
   await refreshKnowledgeCache();
 
   const lines = [
-    `批量匯入完成：成功 ${created + updated} 筆（新增 ${created}、更新 ${updated}）`,
+    `批量匯入完成：成功 ${successes.length} 筆（新增 ${created}、更新 ${updated}）`,
+    successes.length > 0 ? `成功清單：${successes.join('、')}` : '成功清單：無',
     `失敗 ${failures.length} 筆`,
   ];
   for (const fail of failures) {

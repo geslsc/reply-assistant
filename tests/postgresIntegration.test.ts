@@ -3,7 +3,7 @@ import request from 'supertest';
 import express, { Request, Response } from 'express';
 import { Actor, EventType, ThreadState, TIMEOUT_MS } from '../src/types';
 import { loadEnv, resetEnvCache } from '../src/config/env';
-import { dropAllTables, resetDatabase, setPoolForTests, closePool } from '../src/db/client';
+import { dropAllTables, resetDatabase, runMigrations, setPoolForTests, closePool } from '../src/db/client';
 import { createPostgresRepositories } from '../src/repositories/postgresRepositories';
 import { initRepositories } from '../src/repositories';
 import { initKnowledgeBase, matchKnowledgeCard, pauseCard } from '../src/services/knowledgeBaseService';
@@ -254,5 +254,100 @@ describePg('PostgreSQL Integration Tests', () => {
     expect(response.body.db).toBe('disconnected');
 
     setPoolForTests(pool);
+  });
+
+  it('low volume todo migration creates columns and migrates legacy handoff status', async () => {
+    const handoffColumns = await pool.query(
+      `SELECT column_name FROM information_schema.columns
+       WHERE table_name = 'pending_handoffs'
+         AND column_name IN ('status_updated_by', 'status_updated_at', 'reason', 'invalid_reason')`
+    );
+    expect(handoffColumns.rows.map((r) => r.column_name).sort()).toEqual([
+      'invalid_reason',
+      'reason',
+      'status_updated_at',
+      'status_updated_by',
+    ]);
+
+    const reviewColumns = await pool.query(
+      `SELECT column_name FROM information_schema.columns
+       WHERE table_name = 'pending_knowledge_reviews'
+         AND column_name IN ('last_edited_by', 'last_edited_at', 'edit_reason', 'draft_data')`
+    );
+    expect(reviewColumns.rows.map((r) => r.column_name).sort()).toEqual([
+      'draft_data',
+      'edit_reason',
+      'last_edited_at',
+      'last_edited_by',
+    ]);
+
+    const pushTable = await pool.query(
+      `SELECT table_name FROM information_schema.tables
+       WHERE table_schema = 'public' AND table_name = 'push_usage_logs'`
+    );
+    expect(pushTable.rowCount).toBe(1);
+
+    const repos = createPostgresRepositories(pool);
+    const handoff = await repos.pendingHandoffs.create({
+      consultantId: 'consultant-pg',
+      issueThreadId: 'thread-pg',
+      groupId: 'group-pg-handoff',
+      shortCode: 'Q-20260611-PG01',
+      customerQuestion: 'legacy migration test',
+    });
+    await pool.query('ALTER TABLE pending_handoffs DROP CONSTRAINT IF EXISTS pending_handoffs_status_check');
+    await pool.query(`UPDATE pending_handoffs SET status = 'open' WHERE id = $1`, [handoff.id]);
+    await runMigrations(pool);
+    const openMigrated = await repos.pendingHandoffs.findById(handoff.id);
+    expect(openMigrated?.status).toBe('pending');
+    expect(openMigrated?.statusUpdatedBy).toBe('migration');
+    expect(openMigrated?.statusUpdatedAt).toBeTruthy();
+
+    const closedHandoff = await repos.pendingHandoffs.create({
+      consultantId: 'consultant-pg',
+      issueThreadId: 'thread-pg-closed',
+      groupId: 'group-pg-handoff-closed',
+      shortCode: 'Q-20260611-PG03',
+      customerQuestion: 'closed migration test',
+    });
+    await pool.query('ALTER TABLE pending_handoffs DROP CONSTRAINT IF EXISTS pending_handoffs_status_check');
+    await pool.query(`UPDATE pending_handoffs SET status = 'closed' WHERE id = $1`, [closedHandoff.id]);
+    await runMigrations(pool);
+    const closedMigrated = await repos.pendingHandoffs.findById(closedHandoff.id);
+    expect(closedMigrated?.status).toBe('resolved');
+    expect(closedMigrated?.statusUpdatedBy).toBe('migration');
+    expect(closedMigrated?.statusUpdatedAt).toBeTruthy();
+
+    const invalidHandoff = await repos.pendingHandoffs.create({
+      consultantId: 'consultant-pg',
+      issueThreadId: 'thread-pg-2',
+      groupId: 'group-pg-handoff-2',
+      shortCode: 'Q-20260611-PG02',
+      customerQuestion: 'invalid migration test',
+    });
+    await pool.query('ALTER TABLE pending_handoffs DROP CONSTRAINT IF EXISTS pending_handoffs_status_check');
+    await pool.query(
+      `UPDATE pending_handoffs
+       SET status = 'invalid', invalid_reason = 'passive_timeout', reason = NULL
+       WHERE id = $1`,
+      [invalidHandoff.id]
+    );
+    await runMigrations(pool);
+    const ignored = await repos.pendingHandoffs.findById(invalidHandoff.id);
+    expect(ignored?.status).toBe('ignored');
+    expect(ignored?.reason).toBe('passive_timeout');
+    expect(ignored?.statusUpdatedBy).toBe('migration');
+    expect(ignored?.statusUpdatedAt).toBeTruthy();
+
+    const legacyStatusCount = await pool.query(
+      `SELECT COUNT(*)::int AS count FROM pending_handoffs
+       WHERE status NOT IN ('pending', 'in_progress', 'resolved', 'ignored')`
+    );
+    expect(legacyStatusCount.rows[0].count).toBe(0);
+  });
+
+  it('migration is idempotent when run twice', async () => {
+    await expect(runMigrations(pool)).resolves.toBeUndefined();
+    await expect(runMigrations(pool)).resolves.toBeUndefined();
   });
 });

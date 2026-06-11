@@ -39,7 +39,7 @@ export async function buildIdentityReply(userId: string): Promise<string> {
       `LINE userId: ${userId}`,
       'role: 無',
       'status: 未註冊',
-      '代回群組：否',
+      '待辦處理：否',
       'AI 草稿整理：否',
     ].join('\n');
   }
@@ -48,7 +48,7 @@ export async function buildIdentityReply(userId: string): Promise<string> {
     `LINE userId: ${userId}`,
     `role: ${record.role}`,
     `status: ${record.status}`,
-    `代回群組：${canUseWorkflow ? '是' : '否'}`,
+    `待辦處理：${canUseWorkflow ? '是' : '否'}`,
     `AI 草稿整理：${canUseWorkflow ? '是' : '否'}`,
   ].join('\n');
 }

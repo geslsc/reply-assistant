@@ -34,8 +34,9 @@ import * as writeGate from '../src/services/knowledgeCardWriteGate';
 import { registerAdmin, registerInviteCode, requestConsultantJoin, approveConsultant } from '../src/services/consultantWhitelist';
 import { KnowledgeCard } from '../src/schemas/knowledgeCardSchema';
 import { TEST_ADMIN, TEST_CONSULTANT } from './helpers/testSetup';
+import { withEnhancedKnowledgeFields } from './helpers/knowledgeCardTestFixtures';
 
-const sampleCard: KnowledgeCard = {
+const sampleCard: KnowledgeCard = withEnhancedKnowledgeFields({
   card_id: 'remediation-card',
   title: '登入問題',
   patterns: ['怎麼登入'],
@@ -45,13 +46,13 @@ const sampleCard: KnowledgeCard = {
   not_applicable: [],
   escalate_to_consultant: [],
   status: '可用',
-};
+});
 
-const updatedCard: KnowledgeCard = {
+const updatedCard: KnowledgeCard = withEnhancedKnowledgeFields({
   ...sampleCard,
   title: '登入問題（補充版）',
   standard_answer: '請先至後台登入頁完成登入',
-};
+});
 
 async function setupRoles(): Promise<void> {
   await registerAdmin(TEST_ADMIN, 'Admin');
@@ -215,14 +216,12 @@ describe('Phase 2-A remediation acceptance tests', () => {
       userId: TEST_ADMIN,
       text: '需要修改 K-20260608-REV1：請補適用情境',
     });
-    expect(replies[0].text).toMatch(/已將修改意見推回顧問/);
+    expect(replies[0].text).toMatch(/已記錄修改意見/);
     const record = await getRepos().pendingKnowledgeReviews.findById('K-20260608-REV1');
     expect(record?.status).toBe('pending');
     expect(record?.adminResponse).toBe('請補適用情境');
     expect(await getRepos().knowledgeCards.findById('remediation-card')).toBeNull();
-    expect(replies.some((r) => r.userId === TEST_CONSULTANT && r.text?.includes('請補適用情境'))).toBe(
-      true
-    );
+    expect(replies.some((r) => r.userId === TEST_CONSULTANT)).toBe(false);
   });
 
   it('validator failure does not mark pending approved', async () => {
@@ -251,14 +250,13 @@ describe('Phase 2-A remediation acceptance tests', () => {
     expect(events.some((e) => e.detail?.includes('validation_failed'))).toBe(true);
   });
 
-  it('writes bot_message_id after admin push', async () => {
+  it('consultant confirm submit does not push admin notification', async () => {
     await storeUserDraft(TEST_CONSULTANT, sampleCard, JSON.stringify(sampleCard), 'draft text');
     const replies = await handleConsultantConfirmSubmit(TEST_CONSULTANT);
-    const adminPush = replies.find((r) => r.type === 'push' && r.userId === TEST_ADMIN);
-    expect(adminPush?.trackReviewId).toBeDefined();
-    await deliverBotReplies([adminPush!]);
-    const record = await getRepos().pendingKnowledgeReviews.findById(adminPush!.trackReviewId!);
-    expect(record?.botMessageId).toMatch(/^mock-msg-/);
+    expect(replies.find((r) => r.type === 'push' && r.userId === TEST_ADMIN)).toBeUndefined();
+    const pending = await getRepos().pendingKnowledgeReviews.listPending();
+    expect(pending).toHaveLength(1);
+    expect(pending[0].botMessageId).toBeNull();
   });
 
   it('resolves pending by quotedMessageId', async () => {

@@ -30,6 +30,10 @@ import {
   transitionState,
 } from './stateMachine';
 import { highRiskHandoffReason } from './groupHighRiskService';
+import { getIssueThread } from './issueThreadService';
+import { shouldSkipAutoReplyForThread } from './roundQuietService';
+
+const CHITCHAT_REPLY = '收到，若之後有操作使用上的問題，歡迎直接在群組描述喔。';
 
 function withCustomerBufferMessage(replies: BotReply[]): BotReply[] {
   const hasBuffer = replies.some(
@@ -174,6 +178,15 @@ export async function applySemanticClassification(params: {
   clarifyRound: number;
 }): Promise<BotReply[]> {
   const { classification, clarifyRound } = params;
+
+  const thread = await getIssueThread(params.groupId, params.issueThreadId);
+  if (thread && shouldSkipAutoReplyForThread(thread)) {
+    return [];
+  }
+
+  if (classification.isChitchat) {
+    return [{ type: 'group', text: CHITCHAT_REPLY }];
+  }
 
   if (!classification.intentClear) {
     if (clarifyRound >= 2) {

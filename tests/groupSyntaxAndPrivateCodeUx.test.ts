@@ -205,9 +205,7 @@ describe('group syntax and private code UX 2026-06-10', () => {
       const assignment = await getRepos().groupConsultantAssignments.findByGroupId(TEST_GROUP);
 
       expect(assignment?.groupName).toBe('小助手測試');
-      expect(result.replies.some((reply) => reply.text.includes('小助手測試（G-01）'))).toBe(
-        true
-      );
+      expect(result.replies.some((reply) => reply.type === 'push')).toBe(false);
     });
 
     it('stores LINE group name when the bot joins a new group', async () => {
@@ -400,7 +398,7 @@ describe('group syntax and private code UX 2026-06-10', () => {
 
     it('private usage guide triggers', async () => {
       const replies = await handlePrivateUsageGuide(TEST_CONSULTANT);
-      expect(replies[0].text).toContain('代回群組');
+      expect(replies[0].text).toContain('查看待處理問題');
       expect(replies[0].text).toContain('小助手這題我更正');
     });
 

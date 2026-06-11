@@ -8,6 +8,7 @@ import {
   PendingHandoffStatus,
 } from '../repositories/pendingHandoffTypes';
 import { getGroupDisplayName } from './lineGroupSummaryService';
+import { markHandoffIgnored, markHandoffResolved, markHandoffsIgnoredByGroup, markHandoffsIgnoredByThread } from './handoffStatusService';
 
 export async function createPendingHandoff(
   params: CreatePendingHandoffParams
@@ -30,22 +31,26 @@ export async function findOpenHandoffByShortCode(
   return getRepos().pendingHandoffs.findOpenByConsultantAndShortCode(consultantId, shortCode);
 }
 
-export async function closePendingHandoff(id: string): Promise<PendingHandoff | null> {
-  return getRepos().pendingHandoffs.markClosed(id);
+export async function closePendingHandoff(
+  id: string,
+  updatedBy = 'system'
+): Promise<PendingHandoff | null> {
+  return markHandoffResolved(id, updatedBy);
 }
 
 export async function invalidatePendingHandoff(
   id: string,
-  reason: PendingHandoffInvalidReason
+  reason: PendingHandoffInvalidReason,
+  updatedBy = 'system'
 ): Promise<PendingHandoff | null> {
-  return getRepos().pendingHandoffs.markInvalid(id, reason);
+  return markHandoffIgnored(id, updatedBy, reason);
 }
 
 export async function invalidatePendingHandoffsByGroup(
   groupId: string,
   reason: PendingHandoffInvalidReason
 ): Promise<number> {
-  return getRepos().pendingHandoffs.markInvalidByGroup(groupId, reason);
+  return markHandoffsIgnoredByGroup(groupId, reason);
 }
 
 export async function invalidatePendingHandoffsByThread(
@@ -53,7 +58,7 @@ export async function invalidatePendingHandoffsByThread(
   issueThreadId: string,
   reason: PendingHandoffInvalidReason
 ): Promise<number> {
-  return getRepos().pendingHandoffs.markInvalidByThread(groupId, issueThreadId, reason);
+  return markHandoffsIgnoredByThread(groupId, issueThreadId, reason);
 }
 
 export function formatGroupLabelForHandoff(groupId: string, groupName?: string | null): string {
@@ -156,14 +161,14 @@ export async function handleViewPendingHandoffs(userId: string): Promise<BotRepl
       `問題摘要：${handoff.customerQuestion ?? '（無摘要）'}`,
       `目前狀態：${formatHandoffStatusLabel(handoff)}`,
       '可用操作：',
-      `- 指定短碼代回：${handoff.shortCode} [您的回覆內容]`,
+      `- 輸入短碼查看詳情：${handoff.shortCode}`,
       '- 稍後處理',
       '- 不處理 / 略過',
       '- 整理成知識卡草稿',
       ''
     );
   }
-  lines.push('也可回覆「這題 [您的回覆內容]」（僅單筆 pending 時）。');
+  lines.push('輸入問題短碼可查看詳情並撰寫回覆草稿（私訊）。');
   return [{ type: 'push', userId, text: lines.join('\n') }];
 }
 
@@ -183,12 +188,11 @@ export function buildHandoffPrivateCard(params: {
     params.customerQuestion,
     '',
     '【可回覆選項】',
-    '- 回覆這題：[您的回覆內容]（僅單筆 pending 時可用「這題」指代）',
-    `- 指定短碼回覆：${params.shortCode} [您的回覆內容]`,
+    `- 輸入短碼查看詳情：${params.shortCode}`,
     '- 不處理 / 稍後處理：回覆「稍後處理」',
     '- 若稍後處理，之後可輸入「查看待處理問題」叫回清單',
     '',
-    '※ 代回群組屬高副作用操作，執行前會再確認一次，內容將逐字轉貼至群組。',
+    '※ 回覆草稿請透過私訊撰寫，系統會以 replyMessage 提供草稿。',
   ].join('\n');
 }
 
@@ -220,9 +224,12 @@ export async function clearAllPendingHandoffs(): Promise<void> {
 }
 
 export function isPendingHandoffOpen(handoff: PendingHandoff): boolean {
-  return handoff.status === PendingHandoffStatus.OPEN;
+  return (
+    handoff.status === PendingHandoffStatus.PENDING ||
+    handoff.status === PendingHandoffStatus.IN_PROGRESS
+  );
 }
 
 export function isPendingHandoffInvalid(handoff: PendingHandoff): boolean {
-  return handoff.status === PendingHandoffStatus.INVALID;
+  return handoff.status === PendingHandoffStatus.IGNORED;
 }

@@ -38,8 +38,9 @@ import {
   approveConsultant,
 } from '../src/services/consultantWhitelist';
 import { TEST_ADMIN, TEST_CONSULTANT } from './helpers/testSetup';
+import { withEnhancedKnowledgeFields } from './helpers/knowledgeCardTestFixtures';
 
-const checkoutTutorialCard: KnowledgeCard = {
+const checkoutTutorialCard: KnowledgeCard = withEnhancedKnowledgeFields({
   card_id: PENDING_CARD_ID,
   title: '新增結帳單操作教學',
   patterns: ['怎麼新增結帳單'],
@@ -49,9 +50,9 @@ const checkoutTutorialCard: KnowledgeCard = {
   not_applicable: ['不是結帳操作問題'],
   escalate_to_consultant: ['金額錯誤'],
   status: '可用',
-};
+});
 
-const existingCard: KnowledgeCard = {
+const existingCard: KnowledgeCard = withEnhancedKnowledgeFields({
   card_id: 'op-login',
   title: '登入後台',
   patterns: ['怎麼登入'],
@@ -61,7 +62,7 @@ const existingCard: KnowledgeCard = {
   not_applicable: [],
   escalate_to_consultant: [],
   status: '可用',
-};
+});
 
 async function setupRoles(): Promise<void> {
   await registerAdmin(TEST_ADMIN, 'Admin');
@@ -147,7 +148,11 @@ describe('Knowledge card draft mode and UX', () => {
         JSON.stringify({
           ...existingCard,
           title: '登入後台（更新版）',
-          standard_answer: '更新後的登入步驟。\n\n1. 開啟登入頁',
+          standard_answer: '請開啟登入頁（更新版）。',
+          source_consultant_input: {
+            customer_question: '怎麼登入',
+            consultant_reply: '請開啟登入頁（更新版）。',
+          },
         })
       ),
     });

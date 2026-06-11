@@ -86,7 +86,7 @@ describe('consultant management batch 2', () => {
   });
 
   describe('auto bind', () => {
-    it('binds active consultant on assistant intro and notifies admin', async () => {
+    it('binds active consultant on assistant intro without admin push', async () => {
       const code = await seedActiveConsultant(TEST_CONSULTANT, '王小明', '01');
       await handleServiceIntroduction(TEST_GROUP, TEST_ADMIN);
       const groupCode = await getGroupCode(TEST_GROUP);
@@ -99,15 +99,15 @@ describe('consultant management batch 2', () => {
 
       const assignment = await getRepos().groupConsultantAssignments.findByGroupId(TEST_GROUP);
       expect(assignment?.primaryConsultantUserId).toBe(TEST_CONSULTANT);
-      expect(replies.some((r) => r.userId === TEST_ADMIN)).toBe(true);
-      expect(replies.some((r) => r.text.includes(groupCode))).toBe(true);
-      expect(replies.some((r) => r.text.includes(code))).toBe(true);
+      expect(replies).toEqual([]);
+      expect(groupCode).toBeDefined();
+      expect(code).toBeDefined();
 
       const event = await findManagementEvent('auto_bind_primary');
       expect(event).toBeDefined();
     });
 
-    it('binds active admin on assistant intro and notifies self', async () => {
+    it('binds active admin on assistant intro without self push', async () => {
       await handleServiceIntroduction(TEST_GROUP, TEST_ADMIN);
       const groupCode = await getGroupCode(TEST_GROUP);
 
@@ -119,10 +119,8 @@ describe('consultant management batch 2', () => {
 
       const assignment = await getRepos().groupConsultantAssignments.findByGroupId(TEST_GROUP);
       expect(assignment?.primaryConsultantUserId).toBe(TEST_ADMIN);
-      expect(replies.some((r) => r.userId === TEST_ADMIN && r.text.includes('已將您自動綁定'))).toBe(
-        true
-      );
-      expect(replies.some((r) => r.text.includes(groupCode))).toBe(true);
+      expect(replies).toEqual([]);
+      expect(groupCode).toBeDefined();
     });
 
     it('does not bind on general consultant speech', async () => {
@@ -153,9 +151,9 @@ describe('consultant management batch 2', () => {
 
       const assignment = await getRepos().groupConsultantAssignments.findByGroupId(TEST_GROUP);
       expect(assignment?.primaryConsultantUserId).toBe(TEST_CONSULTANT);
-      expect(replies.some((r) => r.userId === TEST_ADMIN)).toBe(true);
-      expect(replies.some((r) => r.text.includes(codeA))).toBe(true);
-      expect(replies.some((r) => r.text.includes(codeB))).toBe(true);
+      expect(replies).toEqual([]);
+      expect(codeA).toBeDefined();
+      expect(codeB).toBeDefined();
 
       const event = await findManagementEvent('second_consultant_detected');
       expect(event).toBeDefined();
@@ -425,11 +423,7 @@ describe('consultant management batch 2', () => {
       const otherOpen = await getRepos().pendingHandoffs.findOpenByConsultant(TEST_CONSULTANT_B);
       expect(primaryOpen).toHaveLength(1);
       expect(otherOpen).toHaveLength(0);
-      const primaryPush = handoff.replies.find((reply) => reply.userId === TEST_CONSULTANT);
-      expect(primaryPush?.deliveryFailureFallbackUserIds).toContain(TEST_ADMIN);
-      expect(primaryPush?.deliveryFailureText).toContain('handoff 私訊投遞失敗');
-      expect(primaryPush?.deliveryFailureHandoffTransfer?.toUserId).toBe(TEST_ADMIN);
-      expect(primaryPush?.deliveryFailureHandoffTransfer?.transferText).toContain('已自動轉交給您');
+      expect(handoff.replies).toEqual([]);
 
       const event = await findManagementEvent('handoff_routed');
       expect(event?.detail).toContain('primary');

@@ -11,9 +11,12 @@ export function formatValidationErrorsForHuman(errors: ValidationError[]): strin
   const sensitiveRiskError = errors.find(
     (e) => e.field === 'risk_level' && SENSITIVE_RISK_LEVEL_PATTERN.test(e.message)
   );
+  const hardRedlineError = errors.find(
+    (e) => e.field === 'can_public_reply' && /命中硬紅線/u.test(e.message)
+  );
   const canPublicReplyError = errors.find((e) => e.field === 'can_public_reply');
 
-  if (sensitiveRiskError) {
+  if (sensitiveRiskError || hardRedlineError) {
     return [
       '這張知識卡涉及儲值、金額或帳務相關內容，因此不會設定成小助手自動公開回答。',
       '',

@@ -1,3 +1,4 @@
+import { loadEnv, resetEnvCache } from '../src/config/env';
 import {
   classifyConsultantIntent,
   ConsultantIntent,
@@ -6,6 +7,11 @@ import {
 } from '../src/services/consultantIntentClassifier';
 
 describe('Consultant Intent Classifier', () => {
+  beforeEach(() => {
+    resetEnvCache();
+    loadEnv({ USE_MEMORY_REPOS: true, ENABLE_GROUP_PROXY_REPLY: false });
+  });
+
   it('classifies direct execute intents from natural language', () => {
     expect(classifyConsultantIntent('自我介紹一下').intent).toBe(ConsultantIntent.SELF_INTRO);
     expect(classifyConsultantIntent('請店家補充一下').intent).toBe(
@@ -23,16 +29,32 @@ describe('Consultant Intent Classifier', () => {
     );
   });
 
+  it('does not classify group proxy reply when disabled', () => {
+    expect(classifyConsultantIntent('Q-20260608-0133-A7 請先清除快取').intent).toBe(
+      ConsultantIntent.UNKNOWN
+    );
+    expect(classifyConsultantIntent('代回群組：測試').intent).toBe(ConsultantIntent.UNKNOWN);
+    expect(requiresConfirmation(ConsultantIntent.REPLY_TO_GROUP)).toBe(false);
+  });
+
   it('requires confirmation for high impact intents', () => {
-    expect(requiresConfirmation(ConsultantIntent.REPLY_TO_GROUP)).toBe(true);
     expect(requiresConfirmation(ConsultantIntent.PAUSE_KNOWLEDGE_CARD)).toBe(true);
     expect(requiresConfirmation(ConsultantIntent.PAUSE_ASSISTANT)).toBe(false);
   });
+});
 
-  it('extracts short code and payload for reply to group', () => {
+describe('Consultant Intent Classifier with group proxy env true', () => {
+  beforeEach(() => {
+    resetEnvCache();
+    loadEnv({ USE_MEMORY_REPOS: true, ENABLE_GROUP_PROXY_REPLY: true });
+  });
+
+  it('keeps REPLY_TO_GROUP confirmation disabled even when env is true', () => {
+    expect(requiresConfirmation(ConsultantIntent.REPLY_TO_GROUP)).toBe(false);
+  });
+
+  it('does not classify short code reply-to-group syntax even when env is true', () => {
     const result = classifyConsultantIntent('Q-20260608-0133-A7 請先清除快取');
-    expect(result.intent).toBe(ConsultantIntent.REPLY_TO_GROUP);
-    expect(result.shortCode).toBe('Q-20260608-0133-A7');
-    expect(result.payload).toBe('請先清除快取');
+    expect(result.intent).toBe(ConsultantIntent.UNKNOWN);
   });
 });

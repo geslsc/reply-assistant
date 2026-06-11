@@ -4,11 +4,9 @@ import {
   isActiveAdmin,
   isActiveConsultantOrAdmin,
   getConsultant,
-  getActiveAdmins,
 } from './consultantWhitelist';
 import { writeKnowledgeCardWithValidation } from './knowledgeCardWriteGate';
 import {
-  formatPendingReviewList,
   listPendingReviews,
   resolveReviewTarget,
   registerReviewMessageMapping,
@@ -40,10 +38,15 @@ import { NO_ACTIVE_DRAFT_SESSION_MESSAGE } from './knowledgeCardDraftService';
 import { suppressPrivateFallbackForUser } from './privateFallbackHintService';
 import { getRepos } from '../repositories';
 import { KnowledgeCard } from '../schemas/knowledgeCardSchema';
+import { KnowledgeCardDraftData } from '../schemas/knowledgeCardDraftSchema';
 import { isPlaceholderCardId } from './knowledgeCardIdService';
 import { buildConfirmSuccessPublicReplyNote } from './knowledgeCardPublicReplyService';
 import { KnowledgeDraftMode } from './knowledgeCardDraftModeService';
-
+import { safeLogKnowledgeDraftEdited } from './lowVolumeTodoEventLogService';
+import {
+  draftDataToKnowledgeCard,
+  knowledgeCardToDraftData,
+} from './knowledgeCardDraftMappingService';
 export const CONFIRM_SUBMIT_PHRASE = '確認送出';
 export const CONFIRM_UPDATE_PHRASES = ['確認更新', '确认更新'] as const;
 export const CONFIRM_BULK_IMPORT_PHRASE = '確認批量匯入';
@@ -255,10 +258,12 @@ export async function handleConsultantConfirmSubmit(userId: string): Promise<Bot
   );
 
   try {
+    const draftData = knowledgeCardToDraftData(draft.card);
     await getRepos().dmSessions.submitDraftAtomically({
       userId,
       reviewId,
       cardData: draft.card,
+      draftData,
       submittedAt,
       draftText: draft.draftText,
     });
@@ -283,54 +288,13 @@ export async function handleConsultantConfirmSubmit(userId: string): Promise<Bot
     ];
   }
 
-  const review = {
-    reviewId,
-    shortCode: reviewId,
-    consultantId: userId,
-    consultantName: consultant.displayName,
-    submittedAt,
-    card: draft.card,
-    draftText: draft.draftText,
-  };
-
-  const adminReplies: BotReply[] = [
+  return [
     {
       type: 'push',
       userId,
-      text: '已送出草稿給 admin 審核，請等待 admin 確認更新。',
+      text: '已送出草稿至待審區，請等待 admin 確認更新。',
     },
   ];
-
-  const admins = await getActiveAdmins();
-  const pendingList = await listPendingReviews();
-  const pushBody = [
-    '【顧問知識卡草稿待審】',
-    `待審短碼：${review.shortCode}`,
-    `review_id：${review.reviewId}`,
-    `顧問名稱：${consultant.displayName ?? '（未設定）'}`,
-    `顧問 userId：${userId}`,
-    `送出時間：${review.submittedAt}`,
-    '',
-    '【草稿全文】',
-    draft.draftText,
-    '',
-    `可回覆「確認更新 ${review.shortCode}」寫入 DB。`,
-    `或「需要修改 ${review.shortCode}：…」推回顧問，或「退回 ${review.shortCode}」。`,
-    pendingList.length > 1 ? `\n【目前待審清單】\n${formatPendingReviewList(pendingList)}` : '',
-  ]
-    .filter(Boolean)
-    .join('\n');
-
-  for (const admin of admins) {
-    adminReplies.push({
-      type: 'push',
-      userId: admin.userId,
-      text: pushBody,
-      trackReviewId: review.reviewId,
-    });
-  }
-
-  return adminReplies;
 }
 
 export async function handleConfirmUpdate(ctx: AdminActionContext): Promise<BotReply[]> {
@@ -368,12 +332,12 @@ export async function handleConfirmUpdate(ctx: AdminActionContext): Promise<BotR
 
   let card;
   let summary = '';
-  let notifyConsultantId: string | null = null;
 
   if (resolved.review) {
-    card = resolved.review.card;
+    card = resolved.review.draftData
+      ? draftDataToKnowledgeCard(resolved.review.draftData)
+      : resolved.review.card;
     summary = `admin confirmed consultant draft from ${resolved.review.consultantId}`;
-    notifyConsultantId = resolved.review.consultantId;
   } else if (resolved.ownDraft) {
     card = resolved.ownDraft.card;
     summary = 'admin self-organized knowledge card';
@@ -418,7 +382,7 @@ export async function handleConfirmUpdate(ctx: AdminActionContext): Promise<BotR
 
   const actionLabel =
     writeResult.effectiveOperation === 'update' ? '已更新知識卡' : '已新增知識卡';
-  const replies: BotReply[] = [
+  return [
     {
       type: 'push',
       userId: ctx.userId,
@@ -428,27 +392,153 @@ export async function handleConfirmUpdate(ctx: AdminActionContext): Promise<BotR
       ].join('\n'),
     },
   ];
+}
 
-  if (
-    notifyConsultantId &&
-    (await getConsultant(notifyConsultantId))?.status === 'active' &&
-    !(await isActiveAdmin(notifyConsultantId))
-  ) {
-    replies.push({
-      type: 'push',
-      userId: notifyConsultantId,
-      text: [
-        `admin 已確認更新您的知識卡草稿（${writeResult.cardId}｜${writeResult.title}），正式生效。`,
-        buildConfirmSuccessPublicReplyNote(writtenCard),
-      ].join('\n'),
-    });
+function parseDraftJsonPayload(jsonPart: string): KnowledgeCardDraftData | null {
+  try {
+    const parsed = JSON.parse(jsonPart) as Record<string, unknown>;
+    if (parsed && typeof parsed === 'object' && 'public_answer_draft' in parsed) {
+      return parsed as unknown as KnowledgeCardDraftData;
+    }
+    if (parsed && typeof parsed === 'object' && 'standard_answer' in parsed) {
+      return knowledgeCardToDraftData(parsed as unknown as KnowledgeCard);
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function parseAdminEditDraftCommand(
+  text: string
+): { shortCode: string; draft: KnowledgeCardDraftData; editReason: string | null } | null {
+  const match = text.match(/^編輯草稿\s+(KDR-\d{8}-[A-Z0-9]{2,}|K-\d{8}-[A-Z0-9]{2,})\s*([\s\S]+)$/i);
+  if (!match) {
+    return null;
+  }
+  const reasonMatch = match[2].match(/^原因[:：](.+?)\n+([\s\S]+)$/s);
+  let editReason: string | null = null;
+  let jsonPart = match[2].trim();
+  if (reasonMatch) {
+    editReason = reasonMatch[1].trim();
+    jsonPart = reasonMatch[2].trim();
+  }
+  const draft = parseDraftJsonPayload(jsonPart);
+  if (!draft) {
+    return null;
+  }
+  return { shortCode: match[1], draft, editReason };
+}
+
+export async function handleAdminEditDraft(ctx: AdminActionContext): Promise<BotReply[]> {
+  if (!(await isActiveAdmin(ctx.userId))) {
+    return [{ type: 'push', userId: ctx.userId, text: '只有 active admin 可編輯待審草稿。' }];
   }
 
-  return replies;
+  const parsed = parseAdminEditDraftCommand(ctx.text);
+  if (!parsed) {
+    return [
+      {
+        type: 'push',
+        userId: ctx.userId,
+        text: '請使用「編輯草稿 K-YYYYMMDD-XX」+ JSON 格式，可選「原因：…」前綴。',
+      },
+    ];
+  }
+
+  const resolved = await resolveReviewTarget({
+    text: `確認更新 ${parsed.shortCode}`,
+    quotedMessageId: ctx.quotedMessageId,
+  });
+  if (resolved.error || !resolved.review) {
+    return [{ type: 'push', userId: ctx.userId, text: resolved.error ?? '找不到待審草稿。' }];
+  }
+
+  const now = new Date().toISOString();
+  const cardData = draftDataToKnowledgeCard(parsed.draft);
+  await getRepos().pendingKnowledgeReviews.updateDraftData({
+    reviewId: resolved.review.reviewId,
+    draftData: parsed.draft,
+    cardData,
+    lastEditedBy: ctx.userId,
+    lastEditedAt: now,
+    editReason: parsed.editReason,
+  });
+
+  await safeLogKnowledgeDraftEdited({
+    review_id: resolved.review.reviewId,
+    edited_by: ctx.userId,
+    edit_reason: parsed.editReason,
+  });
+
+  return [
+    {
+      type: 'push',
+      userId: ctx.userId,
+      text: `已更新草稿 ${parsed.shortCode}。請再輸入「確認更新 ${parsed.shortCode}」經驗證後寫入知識庫。`,
+    },
+  ];
+}
+
+function extractBatchConfirmShortCodes(text: string): string[] {
+  const trimmed = text.trim();
+  for (const phrase of CONFIRM_UPDATE_PHRASES) {
+    if (trimmed.startsWith(`${phrase} `)) {
+      const rest = trimmed.slice(phrase.length).trim();
+      const codes = rest.match(/K-\d{8}-[A-Z0-9]{2,}/g);
+      if (codes && codes.length > 1) {
+        return [...new Set(codes)];
+      }
+    }
+  }
+  return [];
+}
+
+export async function handleBatchConfirmUpdate(ctx: AdminActionContext): Promise<BotReply[]> {
+  const codes = extractBatchConfirmShortCodes(ctx.text);
+  if (codes.length <= 1) {
+    return handleConfirmUpdate(ctx);
+  }
+
+  const successes: string[] = [];
+  const failures: Array<{ code: string; reason: string }> = [];
+
+  for (const code of codes) {
+    try {
+      const result = await handleConfirmUpdate({
+        ...ctx,
+        text: `確認更新 ${code}`,
+      });
+      const text = result[0]?.text ?? '';
+      if (text.includes('已新增知識卡') || text.includes('已更新知識卡')) {
+        successes.push(code);
+      } else {
+        failures.push({ code, reason: text });
+      }
+    } catch (error) {
+      failures.push({
+        code,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  const lines = [
+    '【批次確認更新結果】',
+    `成功 ${successes.length} 筆：${successes.length > 0 ? successes.join('、') : '無'}`,
+    `失敗 ${failures.length} 筆`,
+  ];
+  for (const fail of failures) {
+    lines.push(`- ${fail.code}: ${fail.reason}`);
+  }
+  return [{ type: 'push', userId: ctx.userId, text: lines.join('\n') }];
 }
 
 export async function handleConsultantConfirmUpdateAttempt(ctx: AdminActionContext): Promise<BotReply[]> {
   if (await isActiveAdmin(ctx.userId)) {
+    if (extractBatchConfirmShortCodes(ctx.text).length > 1) {
+      return handleBatchConfirmUpdate(ctx);
+    }
     return handleConfirmUpdate(ctx);
   }
   suppressPrivateFallbackForUser(ctx.userId);
@@ -496,14 +586,7 @@ export async function handleAdminRevisionFeedback(ctx: AdminActionContext): Prom
     {
       type: 'push',
       userId: ctx.userId,
-      text: '已將修改意見推回顧問，尚未寫入 DB。',
-    },
-    {
-      type: 'push',
-      userId: queued.consultantId,
-      text: [`【admin 修改意見】`, parsed.feedback, '', '請修改後重新整理知識卡並「確認送出」。'].join(
-        '\n'
-      ),
+      text: '已記錄修改意見，尚未寫入 DB。',
     },
   ];
 }
@@ -535,14 +618,7 @@ export async function handleAdminRejectDraft(ctx: AdminActionContext): Promise<B
   const queued = resolved.review;
   await markReviewRejected(queued.reviewId, ctx.userId);
 
-  return [
-    { type: 'push', userId: ctx.userId, text: '已退回顧問草稿，尚未寫入 DB。' },
-    {
-      type: 'push',
-      userId: queued.consultantId,
-      text: '您的知識卡草稿已被 admin 退回，請修改後重新整理並「確認送出」。',
-    },
-  ];
+  return [{ type: 'push', userId: ctx.userId, text: '已退回草稿，尚未寫入 DB。' }];
 }
 
 export { isKnowledgeReviewShortCode };

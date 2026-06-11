@@ -52,8 +52,10 @@ export function createPostgresKnowledgeCardRepository(pool: Pool): KnowledgeCard
         `INSERT INTO knowledge_cards (
           card_id, title, patterns, risk_level, can_public_reply, standard_answer,
           not_applicable, escalate_to_consultant, status,
-          created_by, created_at, updated_by, updated_at, confirmed_by, confirmed_at
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+          created_by, created_at, updated_by, updated_at, confirmed_by, confirmed_at,
+          core_question, match_features, applicability_rules, exclusion_rules,
+          reasoning, handoff_conditions, source_consultant_input
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
         RETURNING *`,
         [
           params.cardId,
@@ -71,6 +73,13 @@ export function createPostgresKnowledgeCardRepository(pool: Pool): KnowledgeCard
           params.updatedAt ?? null,
           params.confirmedBy,
           params.confirmedAt,
+          params.coreQuestion ?? null,
+          params.matchFeatures ? JSON.stringify(params.matchFeatures) : null,
+          params.applicabilityRules ? JSON.stringify(params.applicabilityRules) : null,
+          params.exclusionRules ? JSON.stringify(params.exclusionRules) : null,
+          params.reasoning ?? null,
+          params.handoffConditions ? JSON.stringify(params.handoffConditions) : null,
+          params.sourceConsultantInput ? JSON.stringify(params.sourceConsultantInput) : null,
         ]
       );
       return mapPgRowToRecord(result.rows[0]);
@@ -89,7 +98,14 @@ export function createPostgresKnowledgeCardRepository(pool: Pool): KnowledgeCard
           updated_by = $10,
           updated_at = $11,
           confirmed_by = $12,
-          confirmed_at = $13
+          confirmed_at = $13,
+          core_question = $14,
+          match_features = $15,
+          applicability_rules = $16,
+          exclusion_rules = $17,
+          reasoning = $18,
+          handoff_conditions = $19,
+          source_consultant_input = $20
          WHERE card_id = $1
          RETURNING *`,
         [
@@ -106,6 +122,13 @@ export function createPostgresKnowledgeCardRepository(pool: Pool): KnowledgeCard
           params.updatedAt,
           params.confirmedBy,
           params.confirmedAt,
+          params.coreQuestion ?? null,
+          params.matchFeatures ? JSON.stringify(params.matchFeatures) : null,
+          params.applicabilityRules ? JSON.stringify(params.applicabilityRules) : null,
+          params.exclusionRules ? JSON.stringify(params.exclusionRules) : null,
+          params.reasoning ?? null,
+          params.handoffConditions ? JSON.stringify(params.handoffConditions) : null,
+          params.sourceConsultantInput ? JSON.stringify(params.sourceConsultantInput) : null,
         ]
       );
       return result.rows[0] ? mapPgRowToRecord(result.rows[0]) : null;

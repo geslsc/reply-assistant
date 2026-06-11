@@ -1,7 +1,5 @@
 import { Actor, BotReply, EventType, ThreadState } from '../types';
-import { getActiveAdmins } from './consultantWhitelist';
 import { executeHandoff } from './consultantHandoffService';
-import { getGroupDisplayName } from './lineGroupSummaryService';
 import { getActiveIssueThread, updateIssueThread } from './issueThreadService';
 import { getEventsByType } from './eventLogService';
 import { RiskLevel } from '../types';
@@ -81,20 +79,5 @@ export async function handleCustomerTeachingFollowUp(params: {
     notifyTarget: 'fallback_admin',
   });
 
-  const groupName = await getGroupDisplayName(params.groupId);
-  const adminPushText = [
-    '【教學未解決｜需接手確認】',
-    `群組：${groupName ?? params.groupId}`,
-    `店家原問題：${customerQuestion}`,
-    `小助手原回覆：${lastAnswer.answer.slice(0, 200)}${lastAnswer.answer.length > 200 ? '…' : ''}`,
-    `店家後續回覆：${params.text}`,
-    '',
-    '建議顧問接手確認，勿再自動公開回答。',
-  ].join('\n');
-
-  const replies: BotReply[] = [{ type: 'group', text: CUSTOMER_TEACHING_FOLLOWUP_BUFFER }];
-  for (const admin of await getActiveAdmins()) {
-    replies.push({ type: 'push', userId: admin.userId, text: adminPushText });
-  }
-  return replies;
+  return [{ type: 'group', text: CUSTOMER_TEACHING_FOLLOWUP_BUFFER }];
 }

@@ -98,6 +98,7 @@ import {
 import { handleDisabledConsultantGroupCommand } from '../services/disabledConsultantGroupService';
 import { maybeSendServicePeriodEndedMessage } from '../services/servicePeriodEndMessageService';
 import { refreshGroupNameIfNeeded } from '../services/lineGroupSummaryService';
+import { enableRoundQuietForGroup, isRoundQuietPhrase } from '../services/roundQuietService';
 import { buildPrivateCommandKeywordHint } from '../services/privateCommandHintService';
 
 export interface IncomingMessage {
@@ -562,6 +563,17 @@ export async function processMessage(message: IncomingMessage): Promise<ProcessR
 
     if (isGroupCustomerUsageGuideRequest(text)) {
       replies.push(...handleGroupUsageGuide());
+      return { replies, events: await getEventLogs() };
+    }
+
+    if (isRoundQuietPhrase(text)) {
+      const enabled = await enableRoundQuietForGroup(groupId);
+      if (enabled) {
+        replies.push({
+          type: 'group',
+          text: '好的，這一輪我先保持安靜。下一題開始時會恢復協助。',
+        });
+      }
       return { replies, events: await getEventLogs() };
     }
 

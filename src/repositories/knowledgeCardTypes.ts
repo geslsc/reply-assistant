@@ -1,7 +1,18 @@
 import { RiskLevel } from '../types';
 import { DbKnowledgeCardRecord, DbKnowledgeCardStatus } from '../schemas/knowledgeCardDbSchema';
+import { SourceConsultantInput } from '../schemas/knowledgeCardDraftSchema';
 
-export interface KnowledgeCardInsertParams {
+export interface KnowledgeCardEnhancedFields {
+  coreQuestion?: string | null;
+  matchFeatures?: string[] | null;
+  applicabilityRules?: string[] | null;
+  exclusionRules?: string[] | null;
+  reasoning?: string | null;
+  handoffConditions?: string[] | null;
+  sourceConsultantInput?: SourceConsultantInput | null;
+}
+
+export interface KnowledgeCardInsertParams extends KnowledgeCardEnhancedFields {
   cardId: string;
   title: string;
   patterns: string[];
@@ -19,7 +30,7 @@ export interface KnowledgeCardInsertParams {
   confirmedAt: string;
 }
 
-export interface KnowledgeCardUpdateParams {
+export interface KnowledgeCardUpdateParams extends KnowledgeCardEnhancedFields {
   title: string;
   patterns: string[];
   riskLevel: RiskLevel;

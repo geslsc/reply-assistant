@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { KnowledgeCard } from '../schemas/knowledgeCardSchema';
+import { KnowledgeCardDraftData } from '../schemas/knowledgeCardDraftSchema';
 import { getRepos } from '../repositories';
 import { PendingKnowledgeReviewRecord } from '../repositories/pendingKnowledgeReviewTypes';
 import {
@@ -7,6 +8,11 @@ import {
   resolveKnowledgeReviewShortCodeFromText,
 } from './knowledgeReviewShortCodeService';
 import { formatHumanReadableKnowledgeCard } from './knowledgeCardDraftService';
+import { formatHumanReadableDraftData } from './knowledgeCardDraftDisplayService';
+import {
+  draftDataToKnowledgeCard,
+  knowledgeCardToDraftData,
+} from './knowledgeCardDraftMappingService';
 import { getConsultant } from './consultantWhitelist';
 import { getSessionDraft, StoredDraft } from './dmSessionService';
 
@@ -19,6 +25,7 @@ export interface PendingAdminReview {
   consultantName: string | null;
   submittedAt: string;
   card: KnowledgeCard;
+  draftData: KnowledgeCardDraftData | null;
   draftText: string;
 }
 
@@ -31,14 +38,21 @@ async function recordToPendingReview(
   draftText?: string
 ): Promise<PendingAdminReview> {
   const consultant = await getConsultant(record.submittedBy);
+  const draftData = record.draftData;
+  const card = draftData ? draftDataToKnowledgeCard(draftData) : record.cardData;
   return {
     reviewId: record.reviewId,
     shortCode: record.reviewId,
     consultantId: record.submittedBy,
     consultantName: consultant?.displayName ?? null,
     submittedAt: record.submittedAt,
-    card: record.cardData,
-    draftText: draftText ?? formatHumanReadableKnowledgeCard(record.cardData),
+    card,
+    draftData,
+    draftText:
+      draftText ??
+      (draftData
+        ? formatHumanReadableDraftData(draftData, { shortCode: record.reviewId })
+        : formatHumanReadableKnowledgeCard(record.cardData)),
   };
 }
 
@@ -46,6 +60,7 @@ export async function createPendingReview(params: {
   consultantId: string;
   consultantName: string | null;
   card: KnowledgeCard;
+  draftData?: KnowledgeCardDraftData;
   draftText: string;
 }): Promise<PendingAdminReview> {
   const submittedAt = new Date().toISOString();
@@ -57,9 +72,11 @@ export async function createPendingReview(params: {
     pendingIds.has(code)
   );
 
+  const draftData = params.draftData ?? knowledgeCardToDraftData(params.card);
   const record = await getRepos().pendingKnowledgeReviews.insert({
     reviewId,
-    cardData: params.card,
+    cardData: draftDataToKnowledgeCard(draftData),
+    draftData,
     submittedBy: params.consultantId,
     submittedAt,
   });
@@ -233,10 +250,11 @@ export async function getPendingReviewCount(): Promise<number> {
 
 /** 測試用：直接建立待審並註冊 message 對應 */
 export async function seedPendingReviewForTest(
-  review: Omit<PendingAdminReview, 'reviewId' | 'shortCode' | 'submittedAt'> & {
+  review: Omit<PendingAdminReview, 'reviewId' | 'shortCode' | 'submittedAt' | 'draftData'> & {
     reviewId?: string;
     shortCode?: string;
     submittedAt?: string;
+    draftData?: KnowledgeCardDraftData | null;
   },
   messageId?: string
 ): Promise<PendingAdminReview> {
@@ -254,6 +272,7 @@ export async function seedPendingReviewForTest(
   const record = await getRepos().pendingKnowledgeReviews.insert({
     reviewId,
     cardData: review.card,
+    draftData: review.draftData ?? knowledgeCardToDraftData(review.card),
     submittedBy: review.consultantId,
     submittedAt,
   });
@@ -269,6 +288,7 @@ export async function seedPendingReviewForTest(
     consultantName: review.consultantName,
     submittedAt,
     card: review.card,
+    draftData: review.draftData ?? knowledgeCardToDraftData(review.card),
     draftText: review.draftText,
   };
 }

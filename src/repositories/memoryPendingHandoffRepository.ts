@@ -1,11 +1,37 @@
 import { v4 as uuidv4 } from 'uuid';
 import {
+  ACTIONABLE_HANDOFF_STATUSES,
   CreatePendingHandoffParams,
   PendingHandoff,
   PendingHandoffInvalidReason,
   PendingHandoffRepository,
   PendingHandoffStatus,
+  UpdateHandoffStatusParams,
 } from './pendingHandoffTypes';
+
+function isActionable(status: PendingHandoffStatus): boolean {
+  return ACTIONABLE_HANDOFF_STATUSES.includes(status as (typeof ACTIONABLE_HANDOFF_STATUSES)[number]);
+}
+
+function applyStatusUpdate(
+  handoff: PendingHandoff,
+  params: UpdateHandoffStatusParams
+): PendingHandoff {
+  const now = new Date().toISOString();
+  handoff.status = params.status;
+  handoff.statusUpdatedBy = params.updatedBy;
+  handoff.statusUpdatedAt = now;
+  handoff.updatedAt = now;
+  if (params.status === PendingHandoffStatus.IGNORED) {
+    handoff.reason = params.reason ?? null;
+  } else {
+    handoff.reason = null;
+  }
+  if (params.status === PendingHandoffStatus.RESOLVED) {
+    handoff.closedAt = now;
+  }
+  return handoff;
+}
 
 export function createMemoryPendingHandoffRepository(): PendingHandoffRepository {
   const store = new Map<string, PendingHandoff>();
@@ -19,8 +45,10 @@ export function createMemoryPendingHandoffRepository(): PendingHandoffRepository
         issueThreadId: params.issueThreadId,
         groupId: params.groupId,
         shortCode: params.shortCode,
-        status: PendingHandoffStatus.OPEN,
-        invalidReason: null,
+        status: PendingHandoffStatus.PENDING,
+        statusUpdatedBy: 'system',
+        statusUpdatedAt: now,
+        reason: null,
         customerQuestion: params.customerQuestion,
         snoozed: false,
         acknowledgedAt: null,
@@ -32,22 +60,28 @@ export function createMemoryPendingHandoffRepository(): PendingHandoffRepository
       return { ...handoff };
     },
 
-    async findOpenByConsultant(consultantId) {
+    async findActionableByConsultant(consultantId) {
       return Array.from(store.values())
-        .filter(
-          (h) => h.consultantId === consultantId && h.status === PendingHandoffStatus.OPEN
-        )
+        .filter((h) => h.consultantId === consultantId && isActionable(h.status))
         .map((h) => ({ ...h }));
     },
 
-    async findOpenByConsultantAndShortCode(consultantId, shortCode) {
+    async findOpenByConsultant(consultantId) {
+      return this.findActionableByConsultant(consultantId);
+    },
+
+    async findActionableByConsultantAndShortCode(consultantId, shortCode) {
       const handoff = Array.from(store.values()).find(
         (h) =>
           h.consultantId === consultantId &&
           h.shortCode === shortCode &&
-          h.status === PendingHandoffStatus.OPEN
+          isActionable(h.status)
       );
       return handoff ? { ...handoff } : null;
+    },
+
+    async findOpenByConsultantAndShortCode(consultantId, shortCode) {
+      return this.findActionableByConsultantAndShortCode(consultantId, shortCode);
     },
 
     async findByConsultant(consultantId) {
@@ -56,37 +90,64 @@ export function createMemoryPendingHandoffRepository(): PendingHandoffRepository
         .map((h) => ({ ...h }));
     },
 
-    async markClosed(id) {
+    async findById(id) {
       const handoff = store.get(id);
+      return handoff ? { ...handoff } : null;
+    },
+
+    async findActionableByGroup(groupId) {
+      return Array.from(store.values())
+        .filter((h) => h.groupId === groupId && isActionable(h.status))
+        .map((h) => ({ ...h }));
+    },
+
+    async findActionableByThread(groupId, issueThreadId) {
+      return Array.from(store.values())
+        .filter(
+          (h) =>
+            h.groupId === groupId &&
+            h.issueThreadId === issueThreadId &&
+            isActionable(h.status)
+        )
+        .map((h) => ({ ...h }));
+    },
+
+    async updateStatus(params) {
+      const handoff = store.get(params.id);
       if (!handoff) {
         return null;
       }
-      const now = new Date().toISOString();
-      handoff.status = PendingHandoffStatus.CLOSED;
-      handoff.updatedAt = now;
-      handoff.closedAt = now;
+      applyStatusUpdate(handoff, params);
       return { ...handoff };
     },
 
+    async markClosed(id) {
+      return this.updateStatus({
+        id,
+        status: PendingHandoffStatus.RESOLVED,
+        updatedBy: 'system',
+      });
+    },
+
     async markInvalid(id, reason) {
-      const handoff = store.get(id);
-      if (!handoff) {
-        return null;
-      }
-      const now = new Date().toISOString();
-      handoff.status = PendingHandoffStatus.INVALID;
-      handoff.invalidReason = reason;
-      handoff.updatedAt = now;
-      return { ...handoff };
+      return this.updateStatus({
+        id,
+        status: PendingHandoffStatus.IGNORED,
+        updatedBy: 'system',
+        reason,
+      });
     },
 
     async markInvalidByGroup(groupId, reason) {
       let count = 0;
       for (const handoff of store.values()) {
-        if (handoff.groupId === groupId && handoff.status === PendingHandoffStatus.OPEN) {
-          handoff.status = PendingHandoffStatus.INVALID;
-          handoff.invalidReason = reason;
-          handoff.updatedAt = new Date().toISOString();
+        if (handoff.groupId === groupId && isActionable(handoff.status)) {
+          applyStatusUpdate(handoff, {
+            id: handoff.id,
+            status: PendingHandoffStatus.IGNORED,
+            updatedBy: 'system',
+            reason,
+          });
           count++;
         }
       }
@@ -99,11 +160,14 @@ export function createMemoryPendingHandoffRepository(): PendingHandoffRepository
         if (
           handoff.groupId === groupId &&
           handoff.issueThreadId === issueThreadId &&
-          handoff.status === PendingHandoffStatus.OPEN
+          isActionable(handoff.status)
         ) {
-          handoff.status = PendingHandoffStatus.INVALID;
-          handoff.invalidReason = reason;
-          handoff.updatedAt = new Date().toISOString();
+          applyStatusUpdate(handoff, {
+            id: handoff.id,
+            status: PendingHandoffStatus.IGNORED,
+            updatedBy: 'system',
+            reason,
+          });
           count++;
         }
       }
@@ -112,35 +176,42 @@ export function createMemoryPendingHandoffRepository(): PendingHandoffRepository
 
     async markSnoozed(id) {
       const handoff = store.get(id);
-      if (!handoff || handoff.status !== PendingHandoffStatus.OPEN) {
+      if (!handoff || !isActionable(handoff.status)) {
         return null;
       }
       const now = new Date().toISOString();
       handoff.snoozed = true;
       handoff.acknowledgedAt = now;
+      handoff.status = PendingHandoffStatus.IN_PROGRESS;
+      handoff.statusUpdatedBy = handoff.consultantId;
+      handoff.statusUpdatedAt = now;
       handoff.updatedAt = now;
       return { ...handoff };
     },
 
-    async findOpenByConsultantAndGroup(consultantId, groupId) {
+    async findActionableByConsultantAndGroup(consultantId, groupId) {
       return Array.from(store.values())
         .filter(
           (h) =>
             h.consultantId === consultantId &&
             h.groupId === groupId &&
-            h.status === PendingHandoffStatus.OPEN
+            isActionable(h.status)
         )
         .map((h) => ({ ...h }));
     },
 
-    async transferOpenHandoffs({ fromConsultantId, toConsultantId, groupId }) {
+    async findOpenByConsultantAndGroup(consultantId, groupId) {
+      return this.findActionableByConsultantAndGroup(consultantId, groupId);
+    },
+
+    async transferActionableHandoffs({ fromConsultantId, toConsultantId, groupId }) {
       let count = 0;
       const now = new Date().toISOString();
       for (const handoff of store.values()) {
         if (
           handoff.consultantId === fromConsultantId &&
           handoff.groupId === groupId &&
-          handoff.status === PendingHandoffStatus.OPEN
+          isActionable(handoff.status)
         ) {
           handoff.consultantId = toConsultantId;
           handoff.updatedAt = now;
@@ -148,6 +219,10 @@ export function createMemoryPendingHandoffRepository(): PendingHandoffRepository
         }
       }
       return count;
+    },
+
+    async transferOpenHandoffs(params) {
+      return this.transferActionableHandoffs(params);
     },
 
     async clear() {

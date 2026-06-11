@@ -5,18 +5,14 @@ import { transitionState } from './stateMachine';
 import { getIssueThread, updateIssueThread } from './issueThreadService';
 import {
   buildHandoffPrivateCard,
-  buildHandoffShortReminder,
   registerHandoffsForConsultants,
 } from './pendingHandoffService';
 import { deriveShortCode } from './shortCodeService';
 import { getGroupDisplayName, refreshGroupNameIfNeeded } from './lineGroupSummaryService';
-import { getActiveSession } from './dmSessionService';
 import {
   logHandoffRouted,
-  resolveHandoffFailureTarget,
   resolveHandoffTarget,
 } from './handoffRoutingService';
-import { getActiveAdmins } from './consultantWhitelist';
 
 export interface HandoffDraft {
   questionSummary: string;
@@ -70,46 +66,6 @@ export function formatHandoffMessage(
     '',
     '【建議確認項】',
     ...draft.suggestedChecks.map((c) => `- ${c}`),
-  ].join('\n');
-}
-
-function buildHandoffDeliveryFailureText(params: {
-  targetUserId: string;
-  targetRole: string;
-  groupId: string;
-  groupName?: string | null;
-  shortCode: string;
-  customerQuestion: string;
-}): string {
-  const groupLabel = params.groupName
-    ? `${params.groupName}（groupId: ${params.groupId}）`
-    : `尚未取得群組名稱（groupId: ${params.groupId}）`;
-  return [
-    '【handoff 私訊投遞失敗】',
-    `原收件人：${params.targetUserId}`,
-    `原路由角色：${params.targetRole}`,
-    `群組：${groupLabel}`,
-    `問題短碼：${params.shortCode}`,
-    '',
-    '【店家問題】',
-    params.customerQuestion,
-    '',
-    '請協助確認原負責顧問是否仍可接收 LINE 私訊，或先進群組協助處理。',
-  ].join('\n');
-}
-
-function buildTransferredHandoffText(params: {
-  targetUserId: string;
-  targetRole: string;
-  transferRole: string;
-  privateCard: string;
-}): string {
-  return [
-    '【handoff 已自動轉交給您】',
-    `原因：原收件人 ${params.targetUserId}（${params.targetRole}）私訊投遞失敗。`,
-    `接手角色：${params.transferRole}`,
-    '',
-    params.privateCard,
   ].join('\n');
 }
 
@@ -180,57 +136,7 @@ export async function executeHandoff(params: {
     consultantIds: [target.userId],
   });
 
-  const replies: BotReply[] = [];
-  const activeSession = await getActiveSession(target.userId);
-  const privateCardText = formatHandoffMessage(draft, {
-    groupId: params.groupId,
-    groupName,
-    shortCode,
-  });
-  const text = activeSession
-    ? buildHandoffShortReminder({
-        groupId: params.groupId,
-        groupName,
-        shortCode,
-      })
-    : privateCardText;
-  const failureTarget = await resolveHandoffFailureTarget(params.groupId, target.userId);
-  const fallbackAdminIds = (await getActiveAdmins())
-    .map((admin) => admin.userId)
-    .filter((userId) => userId !== target.userId);
-  const failureFallbackUserIds = failureTarget
-    ? [failureTarget.userId]
-    : fallbackAdminIds;
-  replies.push({
-    type: 'push',
-    userId: target.userId,
-    text,
-    trackDeliveryHealthUserId: target.userId,
-    deliveryFailureFallbackUserIds: failureFallbackUserIds,
-    deliveryFailureText: buildHandoffDeliveryFailureText({
-      targetUserId: target.userId,
-      targetRole: target.targetRole,
-      groupId: params.groupId,
-      groupName,
-      shortCode,
-      customerQuestion: params.customerQuestion,
-    }),
-    deliveryFailureHandoffTransfer: failureTarget
-      ? {
-          groupId: params.groupId,
-          fromUserId: target.userId,
-          toUserId: failureTarget.userId,
-          transferText: buildTransferredHandoffText({
-            targetUserId: target.userId,
-            targetRole: target.targetRole,
-            transferRole: failureTarget.targetRole,
-            privateCard: privateCardText,
-          }),
-        }
-      : undefined,
-  });
-
-  return { replies, draft };
+  return { replies: [], draft };
 }
 
 export async function handleKnowledgeMiss(params: {

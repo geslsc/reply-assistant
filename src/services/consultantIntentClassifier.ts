@@ -103,6 +103,10 @@ function extractReplyPayload(text: string): { payload?: string; shortCode?: stri
   return {};
 }
 
+export function isGroupProxyReplyEnabled(): boolean {
+  return false;
+}
+
 export function classifyConsultantIntent(text: string): ClassifiedIntent {
   const trimmed = text.trim();
 
@@ -122,6 +126,9 @@ export function classifyConsultantIntent(text: string): ClassifiedIntent {
     for (const pattern of patterns) {
       if (pattern.test(trimmed)) {
         if (intent === ConsultantIntent.REPLY_TO_GROUP) {
+          if (!isGroupProxyReplyEnabled()) {
+            return { intent: ConsultantIntent.UNKNOWN };
+          }
           const extracted = extractReplyPayload(trimmed);
           return { intent, payload: extracted.payload, shortCode: extracted.shortCode };
         }
@@ -130,7 +137,7 @@ export function classifyConsultantIntent(text: string): ClassifiedIntent {
     }
   }
 
-  if (SHORT_CODE_PATTERN.test(trimmed)) {
+  if (isGroupProxyReplyEnabled() && SHORT_CODE_PATTERN.test(trimmed)) {
     const extracted = extractReplyPayload(trimmed);
     if (extracted.shortCode) {
       return {
@@ -146,6 +153,9 @@ export function classifyConsultantIntent(text: string): ClassifiedIntent {
 
 /** 需二次確認的高副作用意圖 */
 export function requiresConfirmation(intent: ConsultantIntent): boolean {
+  if (intent === ConsultantIntent.REPLY_TO_GROUP && !isGroupProxyReplyEnabled()) {
+    return false;
+  }
   return (
     intent === ConsultantIntent.PAUSE_KNOWLEDGE_CARD ||
     intent === ConsultantIntent.REPLY_TO_GROUP

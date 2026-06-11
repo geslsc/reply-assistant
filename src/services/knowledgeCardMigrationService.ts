@@ -51,16 +51,31 @@ function normalizeLegacyCard(raw: Record<string, unknown>): Record<string, unkno
       : statusRaw === 'paused' || statusRaw === '暫停'
         ? '暫停'
         : statusRaw;
+  const title = String(raw.title ?? cardId);
+  const standardAnswer = String(raw.standard_answer ?? '');
+  const coreQuestion = String(raw.core_question ?? title ?? patterns[0] ?? cardId);
   return {
     card_id: cardId,
-    title: String(raw.title ?? cardId),
+    title,
     patterns,
     risk_level: riskLevel,
     can_public_reply: deriveCanPublicReply(riskLevel),
-    standard_answer: String(raw.standard_answer ?? ''),
+    standard_answer: standardAnswer,
     not_applicable: (raw.not_applicable ?? []) as string[],
     escalate_to_consultant: (raw.escalate_to_consultant ?? []) as string[],
     status,
+    core_question: coreQuestion,
+    match_features: (raw.match_features ?? []) as string[],
+    applicability_rules: (raw.applicability_rules ?? []) as string[],
+    exclusion_rules: (raw.exclusion_rules ?? []) as string[],
+    reasoning: typeof raw.reasoning === 'string' ? raw.reasoning : null,
+    handoff_conditions: (raw.handoff_conditions ?? []) as string[],
+    source_consultant_input:
+      raw.source_consultant_input ??
+      ({
+        customer_question: coreQuestion,
+        consultant_reply: standardAnswer,
+      } as Record<string, unknown>),
   };
 }
 

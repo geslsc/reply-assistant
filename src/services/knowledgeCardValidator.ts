@@ -1,11 +1,19 @@
 import {
   deriveCanPublicReply,
   FORBIDDEN_KNOWLEDGE_CARD_FIELDS,
-  KNOWLEDGE_CARD_FIELDS,
   KnowledgeCard,
   KnowledgeCardStatus,
 } from '../schemas/knowledgeCardSchema';
+import { SourceConsultantInput } from '../schemas/knowledgeCardDraftSchema';
 import { RiskLevel } from '../types';
+import {
+  containsHardSensitiveKeyword,
+  detectHardRedlineCategories,
+  isTutorialExemptKeyword,
+  matchesOperationTutorial,
+  removeNegationContexts,
+} from './sensitiveContentClassifier';
+import { validateStandardAnswerProvenance } from './knowledgeCardProvenanceValidator';
 
 export interface ValidationError {
   field: string;
@@ -21,14 +29,40 @@ export interface ValidationResult {
 const VALID_RISK_LEVELS = new Set<string>(Object.values(RiskLevel));
 const VALID_STATUSES = new Set<KnowledgeCardStatus>(['可用', '暫停']);
 
-import {
-  containsHardSensitiveKeyword,
-  isTutorialExemptKeyword,
-  matchesOperationTutorial,
-  removeNegationContexts,
-} from './sensitiveContentClassifier';
+const LEGACY_REQUIRED_FIELDS = [
+  'card_id',
+  'title',
+  'patterns',
+  'risk_level',
+  'can_public_reply',
+  'standard_answer',
+  'not_applicable',
+  'escalate_to_consultant',
+  'status',
+] as const;
 
-/** 敏感類型關鍵字：金流、帳務、權限、資料異常 */
+const ENHANCED_REQUIRED_FIELDS = ['core_question', 'source_consultant_input'] as const;
+
+const JSONB_STRING_ARRAY_FIELDS = [
+  'match_features',
+  'applicability_rules',
+  'exclusion_rules',
+  'handoff_conditions',
+] as const;
+
+const RISK_BLOCKING_FIELDS = [
+  'title',
+  'patterns',
+  'standard_answer',
+  'core_question',
+  'reasoning',
+  'match_features',
+  'applicability_rules',
+  'exclusion_rules',
+  'handoff_conditions',
+] as const;
+
+/** @deprecated 使用 detectHardRedlineCategories；保留供舊測試 */
 export const SENSITIVE_KEYWORD_GROUPS: Record<string, string[]> = {
   金流: ['金流', '付款', '收款', '匯款', '信用卡', '第三方支付', '藍新', '綠界', 'stripe', 'paypal'],
   帳務: ['帳務', '帳款', '對帳', '發票', '退款', '請款', '帳單', '結算', '財務'],
@@ -45,9 +79,6 @@ export const SENSITIVE_KEYWORD_GROUPS: Record<string, string[]> = {
   ],
 };
 
-/** 僅用於判斷可否 low / 公開回答；不含 not_applicable / escalate_to_consultant */
-const RISK_BLOCKING_FIELDS = ['title', 'patterns', 'standard_answer'] as const;
-
 function collectTextFromField(value: unknown): string[] {
   if (typeof value === 'string') {
     return [value];
@@ -55,10 +86,22 @@ function collectTextFromField(value: unknown): string[] {
   if (Array.isArray(value)) {
     return value.filter((v): v is string => typeof v === 'string');
   }
+  if (value && typeof value === 'object') {
+    return Object.values(value as Record<string, unknown>)
+      .filter((v): v is string => typeof v === 'string');
+  }
   return [];
 }
 
 export function detectSensitiveCategories(texts: string[]): string[] {
+  const hard = detectHardRedlineCategories(texts);
+  if (hard.length > 0) {
+    return hard;
+  }
+  return detectSoftSensitiveCategories(texts);
+}
+
+export function detectSoftSensitiveCategories(texts: string[]): string[] {
   const combined = texts.join(' ');
   const cleaned = removeNegationContexts(combined);
 
@@ -101,16 +144,83 @@ export function detectSensitiveCategories(texts: string[]): string[] {
   return [...new Set(matched)];
 }
 
-export function cardContainsSensitiveContent(card: Partial<KnowledgeCard>): string[] {
+function collectCardContentTexts(card: Partial<KnowledgeCard>): string[] {
   const texts: string[] = [];
   for (const field of RISK_BLOCKING_FIELDS) {
-    texts.push(...collectTextFromField(card[field]));
+    texts.push(...collectTextFromField(card[field as keyof KnowledgeCard]));
   }
-  return detectSensitiveCategories(texts);
+  return texts;
+}
+
+export function cardContainsSensitiveContent(card: Partial<KnowledgeCard>): string[] {
+  return detectSensitiveCategories(collectCardContentTexts(card));
+}
+
+export function cardContainsHardRedlineContent(card: Partial<KnowledgeCard>): string[] {
+  return detectHardRedlineCategories(collectCardContentTexts(card));
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function validateStringArrayField(
+  field: string,
+  value: unknown,
+  errors: ValidationError[],
+  allowEmpty = true
+): string[] | null {
+  if (value === null || value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    errors.push({ field, message: `${field} 必須是字串陣列` });
+    return null;
+  }
+  if (!value.every((item) => typeof item === 'string')) {
+    errors.push({ field, message: `${field} 必須是字串陣列` });
+    return null;
+  }
+  const trimmed = value.map((item) => item.trim());
+  if (!allowEmpty && trimmed.length === 0) {
+    errors.push({ field, message: `${field} 不可為空陣列` });
+  }
+  return trimmed;
+}
+
+function validateSourceConsultantInput(
+  value: unknown,
+  errors: ValidationError[]
+): SourceConsultantInput | null {
+  if (!isPlainObject(value)) {
+    errors.push({ field: 'source_consultant_input', message: 'source_consultant_input 必須是物件' });
+    return null;
+  }
+  const customerQuestion = value.customer_question;
+  const consultantReply = value.consultant_reply;
+  if (typeof customerQuestion !== 'string' || customerQuestion.trim() === '') {
+    errors.push({
+      field: 'source_consultant_input.customer_question',
+      message: 'source_consultant_input.customer_question 必填',
+    });
+  }
+  if (typeof consultantReply !== 'string' || consultantReply.trim() === '') {
+    errors.push({
+      field: 'source_consultant_input.consultant_reply',
+      message: 'source_consultant_input.consultant_reply 必填',
+    });
+  }
+  if (errors.some((e) => e.field.startsWith('source_consultant_input'))) {
+    return null;
+  }
+  return {
+    customer_question: (customerQuestion as string).trim(),
+    consultant_reply: (consultantReply as string).trim(),
+    raw_input:
+      typeof value.raw_input === 'string' && value.raw_input.trim() !== ''
+        ? value.raw_input.trim()
+        : undefined,
+  };
 }
 
 export function validateKnowledgeCard(raw: unknown): ValidationResult {
@@ -126,13 +236,7 @@ export function validateKnowledgeCard(raw: unknown): ValidationResult {
     }
   }
 
-  for (const key of Object.keys(raw)) {
-    if (!(KNOWLEDGE_CARD_FIELDS as readonly string[]).includes(key)) {
-      errors.push({ field: key, message: `不允許額外欄位 ${key}` });
-    }
-  }
-
-  for (const field of KNOWLEDGE_CARD_FIELDS) {
+  for (const field of [...LEGACY_REQUIRED_FIELDS, ...ENHANCED_REQUIRED_FIELDS]) {
     if (!(field in raw)) {
       errors.push({ field, message: `缺少必填欄位 ${field}` });
     }
@@ -150,6 +254,9 @@ export function validateKnowledgeCard(raw: unknown): ValidationResult {
   if (typeof card.title !== 'string' || card.title.trim() === '') {
     errors.push({ field: 'title', message: 'title 必須是非空字串' });
   }
+  if (typeof card.core_question !== 'string' || card.core_question.trim() === '') {
+    errors.push({ field: 'core_question', message: 'core_question 必填' });
+  }
   if (
     !Array.isArray(card.patterns) ||
     card.patterns.length === 0 ||
@@ -158,7 +265,7 @@ export function validateKnowledgeCard(raw: unknown): ValidationResult {
     errors.push({ field: 'patterns', message: 'patterns 必須是非空字串陣列' });
   }
   if (typeof card.standard_answer !== 'string' || card.standard_answer.trim() === '') {
-    errors.push({ field: 'standard_answer', message: 'standard_answer 必須是非空字串' });
+    errors.push({ field: 'standard_answer', message: 'standard_answer 必填' });
   }
   if (
     !Array.isArray(card.not_applicable) ||
@@ -188,36 +295,99 @@ export function validateKnowledgeCard(raw: unknown): ValidationResult {
     errors.push({ field: 'can_public_reply', message: 'can_public_reply 必須是 boolean' });
   }
 
+  const sourceInput = validateSourceConsultantInput(card.source_consultant_input, errors);
+  const matchFeatures = validateStringArrayField('match_features', card.match_features, errors);
+  const applicabilityRules = validateStringArrayField(
+    'applicability_rules',
+    card.applicability_rules,
+    errors
+  );
+  const exclusionRules = validateStringArrayField('exclusion_rules', card.exclusion_rules, errors);
+  const handoffConditions = validateStringArrayField(
+    'handoff_conditions',
+    card.handoff_conditions,
+    errors
+  );
+
+  if (card.reasoning !== undefined && card.reasoning !== null && typeof card.reasoning !== 'string') {
+    errors.push({ field: 'reasoning', message: 'reasoning 必須是字串或 null' });
+  }
+
   if (errors.length > 0) {
     return { valid: false, errors };
   }
 
-  const riskLevel = card.risk_level as RiskLevel;
-  const expectedCanPublicReply = deriveCanPublicReply(riskLevel);
-
-  if (card.can_public_reply !== expectedCanPublicReply) {
-    errors.push({
-      field: 'can_public_reply',
-      message: `can_public_reply 必須由 risk_level 推導為 ${expectedCanPublicReply}，不得自行設定`,
-    });
-  }
-
+  let resolvedRisk = card.risk_level as RiskLevel;
   const partial: Partial<KnowledgeCard> = {
     title: card.title as string,
     patterns: card.patterns as string[],
     standard_answer: card.standard_answer as string,
+    core_question: card.core_question as string,
+    reasoning: (card.reasoning as string | null | undefined) ?? null,
+    match_features: matchFeatures ?? [],
+    applicability_rules: applicabilityRules ?? [],
+    exclusion_rules: exclusionRules ?? [],
+    handoff_conditions: handoffConditions ?? [],
     not_applicable: card.not_applicable as string[],
     escalate_to_consultant: card.escalate_to_consultant as string[],
-    risk_level: riskLevel,
+    risk_level: resolvedRisk,
+    source_consultant_input: sourceInput ?? undefined,
   };
 
-  const sensitiveCategories = cardContainsSensitiveContent(partial);
-  if (sensitiveCategories.length > 0 && riskLevel === RiskLevel.LOW) {
+  const hardRedlines = cardContainsHardRedlineContent(partial);
+  if (hardRedlines.length > 0) {
+    if (card.can_public_reply === true) {
+      errors.push({
+        field: 'can_public_reply',
+        message: `命中硬紅線（${hardRedlines.join('、')}），不得公開回答`,
+      });
+    }
+    if (resolvedRisk === RiskLevel.LOW) {
+      resolvedRisk = RiskLevel.MID;
+    }
+  }
+
+  const softCategories = detectSoftSensitiveCategories(collectCardContentTexts(partial));
+  if (softCategories.length > 0 && resolvedRisk === RiskLevel.LOW) {
     errors.push({
       field: 'risk_level',
-      message: `命中敏感類型（${sensitiveCategories.join('、')}），risk_level 不得為 low`,
+      message: `risk_level 不可為 low（命中 ${softCategories.join('、')}）`,
     });
   }
+
+  const resolvedCanPublic =
+    hardRedlines.length > 0 || softCategories.length > 0
+      ? false
+      : deriveCanPublicReply(resolvedRisk);
+
+  if (card.can_public_reply === true && resolvedCanPublic === false) {
+    if (!errors.some((error) => error.field === 'can_public_reply')) {
+      errors.push({
+        field: 'can_public_reply',
+        message: 'can_public_reply 與內容風險不一致，不得公開回答',
+      });
+    }
+  }
+
+  if (card.can_public_reply === true && resolvedRisk !== RiskLevel.LOW) {
+    errors.push({
+      field: 'can_public_reply',
+      message: 'can_public_reply=true 時 risk_level 必須是 low',
+    });
+  }
+
+  if (
+    hardRedlines.length === 0 &&
+    softCategories.length === 0 &&
+    card.can_public_reply !== resolvedCanPublic
+  ) {
+    errors.push({
+      field: 'can_public_reply',
+      message: `can_public_reply 必須由 risk_level 推導為 ${resolvedCanPublic}，不得自行設定`,
+    });
+  }
+
+  errors.push(...validateStandardAnswerProvenance(card.standard_answer as string, sourceInput));
 
   if (errors.length > 0) {
     return { valid: false, errors };
@@ -227,18 +397,24 @@ export function validateKnowledgeCard(raw: unknown): ValidationResult {
     card_id: (card.card_id as string).trim(),
     title: (card.title as string).trim(),
     patterns: (card.patterns as string[]).map((p) => p.trim()),
-    risk_level: riskLevel,
-    can_public_reply: expectedCanPublicReply,
+    risk_level: resolvedRisk,
+    can_public_reply: resolvedCanPublic,
     standard_answer: (card.standard_answer as string).trim(),
     not_applicable: (card.not_applicable as string[]).map((p) => p.trim()),
     escalate_to_consultant: (card.escalate_to_consultant as string[]).map((p) => p.trim()),
     status: card.status as KnowledgeCardStatus,
+    core_question: (card.core_question as string).trim(),
+    match_features: matchFeatures ?? [],
+    applicability_rules: applicabilityRules ?? [],
+    exclusion_rules: exclusionRules ?? [],
+    reasoning: typeof card.reasoning === 'string' ? card.reasoning.trim() : null,
+    handoff_conditions: handoffConditions ?? [],
+    source_consultant_input: sourceInput,
   };
 
   return { valid: true, errors: [], normalized };
 }
 
-/** 正規化並強制覆寫 can_public_reply，供 LLM 輸出後處理 */
 export function enforceKnowledgeCardRules(raw: unknown): ValidationResult {
   if (!isPlainObject(raw)) {
     return validateKnowledgeCard(raw);

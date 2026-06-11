@@ -151,23 +151,8 @@ async function buildAutoBindAdminNotifications(params: {
   binder: ConsultantRecord;
   binderIsAdmin: boolean;
 }): Promise<BotReply[]> {
-  const groupLabel = `${formatAssignmentGroupLabel(params.assignment)}（${params.assignment.groupCode}）`;
-  const replies: BotReply[] = [];
-  const admins = await getActiveAdmins();
-
-  for (const admin of admins) {
-    let text: string;
-    if (params.binderIsAdmin && admin.userId === params.binder.userId) {
-      text = `已將您自動綁定為 ${groupLabel} 的主負責顧問。`;
-    } else if (params.binderIsAdmin) {
-      text = `已將 ${formatConsultantLabel(params.binder)} 自動綁定為 ${groupLabel} 的主負責顧問。`;
-    } else {
-      text = `已將 ${formatConsultantLabel(params.binder)} 自動綁定為 ${groupLabel} 的主負責顧問。`;
-    }
-    replies.push({ type: 'push', userId: admin.userId, text });
-  }
-
-  return replies;
+  void params;
+  return [];
 }
 
 async function autoBindPrimaryConsultant(
@@ -234,11 +219,8 @@ async function notifySecondConsultantDetected(
     },
   });
 
-  const replies: BotReply[] = [];
-  for (const admin of await getActiveAdmins()) {
-    replies.push({ type: 'push', userId: admin.userId, text });
-  }
-  return replies;
+  void text;
+  return [];
 }
 
 /** 顧問 / admin 使用「小助手」有效語法時的綁定與偵測副作用 */

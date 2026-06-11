@@ -1,5 +1,6 @@
 import { DmSessionDraftData, DmSessionRecord, DmSessionRepository, CreateDmSessionParams } from './dmSessionTypes';
 import { KnowledgeCard } from '../schemas/knowledgeCardSchema';
+import { KnowledgeCardDraftData } from '../schemas/knowledgeCardDraftSchema';
 
 function cloneRecord(record: DmSessionRecord): DmSessionRecord {
   return {
@@ -30,6 +31,7 @@ export function createMemoryDmSessionRepository(
   pendingInsert: (params: {
     reviewId: string;
     cardData: KnowledgeCard;
+    draftData?: KnowledgeCardDraftData;
     submittedBy: string;
     submittedAt: string;
   }) => Promise<void>
@@ -143,6 +145,7 @@ export function createMemoryDmSessionRepository(
       await pendingInsert({
         reviewId: params.reviewId,
         cardData: params.cardData,
+        draftData: params.draftData,
         submittedBy: params.userId,
         submittedAt: params.submittedAt,
       });

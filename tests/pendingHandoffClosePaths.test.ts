@@ -65,7 +65,7 @@ describe('Pending Handoffs Close Paths', () => {
     await assertNoOpenPending(TEST_CONSULTANT);
     const all = await getPendingHandoffs(TEST_CONSULTANT);
     const updated = all.find((h) => h.id === handoff.id);
-    expect(updated?.status).toBe(PendingHandoffStatus.CLOSED);
+    expect(updated?.status).toBe(PendingHandoffStatus.RESOLVED);
     expect(updated?.closedAt).not.toBeNull();
   });
 
@@ -87,8 +87,8 @@ describe('Pending Handoffs Close Paths', () => {
 
     await assertNoOpenPending(TEST_CONSULTANT);
     const updated = (await getPendingHandoffs(TEST_CONSULTANT)).find((h) => h.id === handoff.id);
-    expect(updated?.status).toBe(PendingHandoffStatus.INVALID);
-    expect(updated?.invalidReason).toBe(PendingHandoffInvalidReason.PASSIVE_TIMEOUT);
+    expect(updated?.status).toBe(PendingHandoffStatus.IGNORED);
+    expect(updated?.reason).toBe(PendingHandoffInvalidReason.PASSIVE_TIMEOUT);
   });
 
   it('invalidates on group mute with group_muted reason', async () => {
@@ -106,8 +106,8 @@ describe('Pending Handoffs Close Paths', () => {
 
     await assertNoOpenPending(TEST_CONSULTANT);
     const updated = (await getPendingHandoffs(TEST_CONSULTANT)).find((h) => h.id === handoff.id);
-    expect(updated?.status).toBe(PendingHandoffStatus.INVALID);
-    expect(updated?.invalidReason).toBe(PendingHandoffInvalidReason.GROUP_MUTED);
+    expect(updated?.status).toBe(PendingHandoffStatus.IGNORED);
+    expect(updated?.reason).toBe(PendingHandoffInvalidReason.GROUP_MUTED);
   });
 
   it('invalidates on service period end with service_ended reason', async () => {
@@ -128,8 +128,8 @@ describe('Pending Handoffs Close Paths', () => {
 
     await assertNoOpenPending(TEST_CONSULTANT);
     const updated = (await getPendingHandoffs(TEST_CONSULTANT)).find((h) => h.id === handoff.id);
-    expect(updated?.status).toBe(PendingHandoffStatus.INVALID);
-    expect(updated?.invalidReason).toBe(PendingHandoffInvalidReason.SERVICE_ENDED);
+    expect(updated?.status).toBe(PendingHandoffStatus.IGNORED);
+    expect(updated?.reason).toBe(PendingHandoffInvalidReason.SERVICE_ENDED);
   });
 
   it('invalidates per thread on OUT_OF_SERVICE_PERIOD with out_of_service reason', async () => {
@@ -154,7 +154,7 @@ describe('Pending Handoffs Close Paths', () => {
 
     await assertNoOpenPending(TEST_CONSULTANT);
     const updated = (await getPendingHandoffs(TEST_CONSULTANT)).find((h) => h.id === handoff.id);
-    expect(updated?.status).toBe(PendingHandoffStatus.INVALID);
-    expect(updated?.invalidReason).toBe(PendingHandoffInvalidReason.OUT_OF_SERVICE);
+    expect(updated?.status).toBe(PendingHandoffStatus.IGNORED);
+    expect(updated?.reason).toBe(PendingHandoffInvalidReason.OUT_OF_SERVICE);
   });
 });

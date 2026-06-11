@@ -60,8 +60,9 @@ import { validateKnowledgeCard, enforceKnowledgeCardRules } from '../src/service
 import { writeKnowledgeCardWithValidation } from '../src/services/knowledgeCardWriteGate';
 import { KnowledgeCard } from '../src/schemas/knowledgeCardSchema';
 import { TEST_ADMIN, TEST_CONSULTANT } from './helpers/testSetup';
+import { withEnhancedKnowledgeFields } from './helpers/knowledgeCardTestFixtures';
 
-const sampleCard: KnowledgeCard = {
+const sampleCard: KnowledgeCard = withEnhancedKnowledgeFields({
   card_id: 'test-card-001',
   title: '測試卡',
   patterns: ['測試問題'],
@@ -71,7 +72,7 @@ const sampleCard: KnowledgeCard = {
   not_applicable: [],
   escalate_to_consultant: [],
   status: '可用',
-};
+});
 
 async function setupRoles(): Promise<void> {
   await registerAdmin(TEST_ADMIN, 'Admin');
@@ -133,11 +134,12 @@ describe('Knowledge card two-step confirmation', () => {
     await setupRoles();
   });
 
-  it('consultant confirm submit pushes draft with short code to admin without DB write', async () => {
+  it('consultant confirm submit writes pending review silently without admin push or DB write', async () => {
     await storeUserDraft(TEST_CONSULTANT, sampleCard, JSON.stringify(sampleCard), 'draft text');
     const replies = await handleConsultantConfirmSubmit(TEST_CONSULTANT);
-    expect(replies.some((r) => r.type === 'push' && r.userId === TEST_ADMIN)).toBe(true);
-    expect(replies.some((r) => r.text?.includes('待審短碼：K-'))).toBe(true);
+    expect(replies.some((r) => r.type === 'push' && r.userId === TEST_ADMIN)).toBe(false);
+    expect(replies.some((r) => r.type === 'push' && r.userId === TEST_CONSULTANT)).toBe(true);
+    expect((await getRepos().pendingKnowledgeReviews.listPending()).length).toBe(1);
     expect(await getRepos().knowledgeCards.findById(sampleCard.card_id)).toBeNull();
   });
 
@@ -419,7 +421,7 @@ describe('Knowledge review short code uniqueness', () => {
       userId: TEST_ADMIN,
       text: '需要修改 K-20260608-AAAA：請調整內容',
     });
-    expect(replies[0].text).toMatch(/已將修改意見推回顧問/);
+    expect(replies[0].text).toMatch(/已記錄修改意見/);
     expect(await getRepos().knowledgeCards.findById(sampleCard.card_id)).toBeNull();
   });
 
@@ -435,7 +437,7 @@ describe('Knowledge review short code uniqueness', () => {
       userId: TEST_ADMIN,
       text: '退回 K-20260608-AAAA',
     });
-    expect(replies[0].text).toMatch(/已退回顧問草稿/);
+    expect(replies[0].text).toMatch(/已退回草稿/);
     expect(await getRepos().knowledgeCards.findById(sampleCard.card_id)).toBeNull();
   });
 

@@ -21,6 +21,7 @@ export interface AppEnv {
   DEBOUNCE_SECONDS: number;
   GROUP_CONVERGENCE_SWEEP_SECONDS: number;
   OFFICIAL_LINE_URL: string | null;
+  ENABLE_GROUP_PROXY_REPLY: boolean;
 }
 
 let cachedEnv: AppEnv | null = null;
@@ -70,6 +71,9 @@ export function loadEnv(overrides: Partial<AppEnv> = {}): AppEnv {
       overrides.GROUP_CONVERGENCE_SWEEP_SECONDS ??
       Number(process.env.GROUP_CONVERGENCE_SWEEP_SECONDS ?? 10),
     OFFICIAL_LINE_URL: overrides.OFFICIAL_LINE_URL ?? process.env.OFFICIAL_LINE_URL ?? null,
+    ENABLE_GROUP_PROXY_REPLY:
+      overrides.ENABLE_GROUP_PROXY_REPLY ??
+      process.env.ENABLE_GROUP_PROXY_REPLY === 'true',
   };
   return cachedEnv;
 }

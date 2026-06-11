@@ -67,7 +67,7 @@ export function isOrganizeFromHandoffPhrase(text: string): boolean {
 }
 
 export const ORGANIZE_FROM_HANDOFF_NOT_FOUND_MESSAGE =
-  '目前找不到最近可整理的代回紀錄。請先完成一次代回群組，或改用「幫我整理知識卡」手動新增。';
+  '目前找不到最近可整理的待辦回覆紀錄。請先處理一筆待辦問題，或改用「幫我整理知識卡」手動新增。';
 
 export function buildOrganizeContentFromHandoff(context: HandoffReplyContext): string {
   return [

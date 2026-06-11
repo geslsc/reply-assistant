@@ -1,4 +1,5 @@
 import { KnowledgeCard } from '../schemas/knowledgeCardSchema';
+import { KnowledgeCardDraftData } from '../schemas/knowledgeCardDraftSchema';
 
 export type DmSessionType = 'knowledge_draft';
 
@@ -71,6 +72,7 @@ export interface DmSessionRepository {
     userId: string;
     reviewId: string;
     cardData: KnowledgeCard;
+    draftData: KnowledgeCardDraftData;
     submittedAt: string;
     draftText: string;
   }): Promise<{ session: DmSessionRecord; reviewId: string }>;

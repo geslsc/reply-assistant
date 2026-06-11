@@ -42,10 +42,11 @@ import {
 import { setLineGroupSummaryClient } from '../src/services/lineGroupSummaryService';
 import { KnowledgeCard } from '../src/schemas/knowledgeCardSchema';
 import { TEST_ADMIN, TEST_CONSULTANT, TEST_CUSTOMER, TEST_GROUP } from './helpers/testSetup';
+import { withEnhancedKnowledgeFields } from './helpers/knowledgeCardTestFixtures';
 
 const SECRET = 'test-channel-secret';
 
-const sampleCard: KnowledgeCard = {
+const sampleCard: KnowledgeCard = withEnhancedKnowledgeFields({
   card_id: 'ux-card',
   title: '登入問題',
   patterns: ['怎麼登入後台'],
@@ -55,20 +56,20 @@ const sampleCard: KnowledgeCard = {
   not_applicable: ['不是登入相關問題'],
   escalate_to_consultant: ['帳號被鎖定'],
   status: '可用',
-};
+});
 
-const billingDisplayCard: KnowledgeCard = {
+const billingDisplayCard: KnowledgeCard = withEnhancedKnowledgeFields({
   card_id: 'billing-display-card',
   title: '儲值卡設定',
   patterns: ['儲值卡要怎麼設定？', '客人要買儲值卡時怎麼操作？'],
-  risk_level: RiskLevel.LOW,
-  can_public_reply: true,
+  risk_level: RiskLevel.MID,
+  can_public_reply: false,
   standard_answer:
     '儲值卡設定需先到「設定」→「票券管理」建立儲值卡。結帳時若客人要購買儲值卡，需另外開快速結帳單協助購買。',
   not_applicable: ['不是儲值卡相關問題'],
   escalate_to_consultant: ['儲值金額有誤', '店家看不懂帳務或扣抵狀況'],
   status: '可用',
-};
+});
 
 async function setupConsultant(): Promise<void> {
   await registerAdmin(TEST_ADMIN);
@@ -297,7 +298,7 @@ describe('UX fixes 2026-06-09', () => {
         userId: TEST_CONSULTANT,
         text: '確認送出',
       });
-      expect(replies?.[0].text).toMatch(/已送出草稿給 admin 審核/);
+      expect(replies?.[0].text).toMatch(/已送出草稿至待審區/);
     });
   });
 
@@ -354,10 +355,8 @@ describe('UX fixes 2026-06-09', () => {
         reason: '知識庫未命中',
         riskLevel: RiskLevel.UNKNOWN,
       });
-      const consultantReply = replies.find((reply) => reply.userId === TEST_CONSULTANT);
-      expect(consultantReply?.text).toMatch(/【群組新問題提醒】/);
-      expect(consultantReply?.text).toContain('大寶寶測試群');
-      expect(consultantReply?.text).not.toMatch(/【問題收斂卡】/);
+      expect(replies).toEqual([]);
+      expect(await getRepos().pendingHandoffs.findOpenByConsultant(TEST_CONSULTANT)).toHaveLength(1);
     });
 
     it('lists open pending handoffs via 查看待處理問題', async () => {

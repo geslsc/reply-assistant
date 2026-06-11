@@ -44,15 +44,14 @@ export function buildPrivateCommandKeywordHint(
     };
   }
 
-  if (/待處理|代回|handoff|回覆這題|稍後處理/u.test(trimmed)) {
+  if (/待處理|handoff|稍後處理/u.test(trimmed)) {
     return {
       type: 'push',
       userId,
       text: compactLines('我有看到您在處理群組問題，可以用：', [
         '查看待處理問題',
-        'Q-xxxxxxxx-xxxx-xx 回覆：……',
-        '幫我回 Q-xxxxxxxx-xxxx-xx：「……」',
-        'Q-xxxxxxxx-xxxx-xx 整理成知識卡',
+        '輸入問題短碼查看詳情',
+        '於私訊撰寫回覆草稿',
       ]),
     };
   }

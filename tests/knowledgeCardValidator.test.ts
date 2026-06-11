@@ -13,9 +13,10 @@ import {
   generateKnowledgeCardDraft,
   setLlmClient,
 } from '../src/services/knowledgeCardDraftService';
+import { withEnhancedKnowledgeFields } from './helpers/knowledgeCardTestFixtures';
 
 describe('Knowledge Card Validator', () => {
-  const baseCard: KnowledgeCard = {
+  const baseCard: KnowledgeCard = withEnhancedKnowledgeFields({
     card_id: 'op-login',
     title: '登入後台',
     patterns: ['怎麼登入'],
@@ -25,7 +26,7 @@ describe('Knowledge Card Validator', () => {
     not_applicable: [],
     escalate_to_consultant: [],
     status: '可用',
-  };
+  });
 
   it('forces can_public_reply false for mid/high/unknown', () => {
     for (const level of [RiskLevel.MID, RiskLevel.HIGH, RiskLevel.UNKNOWN]) {
@@ -93,21 +94,43 @@ describe('Knowledge Card Validator', () => {
     expect(result.normalized?.can_public_reply).toBe(true);
   });
 
-  it('allows stored-value card setup tutorial as low risk', () => {
-    const card = {
+  it('allows stored-value card setup tutorial as low risk public reply', () => {
+    const card = withEnhancedKnowledgeFields({
       ...baseCard,
       card_id: 'stored-value-setup',
       title: '儲值卡設定',
-      patterns: ['儲值卡在哪裡設定', '如何建立儲值卡'],
+      patterns: ['如何設定儲值卡', '儲值卡功能在哪裡'],
       standard_answer: '到「設定」→「票券管理」中新增儲值卡。',
       not_applicable: ['儲值金額錯誤'],
       escalate_to_consultant: ['餘額異常', '扣抵異常'],
       risk_level: RiskLevel.LOW,
       can_public_reply: true,
-    };
+    });
     const result = validateKnowledgeCard(card);
     expect(result.valid).toBe(true);
     expect(result.normalized?.can_public_reply).toBe(true);
+    expect(result.normalized?.risk_level).toBe(RiskLevel.LOW);
+  });
+
+  it('blocks billing-related stored value questions from public reply', () => {
+    for (const patterns of [
+      ['這筆儲值有沒有入帳'],
+      ['會員儲值紀錄可以查嗎'],
+      ['退款狀態怎麼查'],
+    ]) {
+      const result = validateKnowledgeCard(
+        withEnhancedKnowledgeFields({
+          ...baseCard,
+          card_id: `billing-${patterns[0]}`,
+          title: patterns[0],
+          patterns,
+          standard_answer: '請聯絡教練協助確認。',
+          risk_level: RiskLevel.LOW,
+          can_public_reply: true,
+        })
+      );
+      expect(result.valid).toBe(false);
+    }
   });
 
   it('blocks stored-value amount errors', () => {

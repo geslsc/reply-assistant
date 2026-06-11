@@ -69,11 +69,9 @@ function groupMsg(userId: string, text: string) {
   return { userId, groupId: TEST_GROUP, text, isGroup: true };
 }
 
-function expectFallbackAdminOnlyHandoff(replies: BotReply[]): void {
+function expectNoPushHandoffNotification(replies: BotReply[]): void {
   const pushes = replies.filter((reply) => reply.type === 'push');
-  expect(pushes.length).toBeGreaterThan(0);
-  expect(pushes.every((reply) => reply.userId === TEST_ADMIN)).toBe(true);
-  expect(pushes.some((reply) => reply.userId === TEST_CONSULTANT)).toBe(false);
+  expect(pushes).toHaveLength(0);
 }
 
 async function expectFallbackAdminOnlyPendingHandoffs(): Promise<void> {
@@ -117,12 +115,12 @@ describe('Group message convergence and semantic routing', () => {
     expect(groupReply?.text).toBe(buildPublicAnswer(card.standard_answer));
   });
 
-  it('handoffs mid/high risk with fixed buffer message and admin push', async () => {
+  it('handoffs mid/high risk with fixed buffer message and pull-based admin pending item', async () => {
     const result = await processMessage(groupMsg(TEST_CUSTOMER, '畫面一片空白'));
     expect(result.replies.find((r) => r.type === 'group')?.text).toBe(
       CUSTOMER_HANDOFF_BUFFER_MESSAGE
     );
-    expectFallbackAdminOnlyHandoff(result.replies);
+    expectNoPushHandoffNotification(result.replies);
     await expectFallbackAdminOnlyPendingHandoffs();
     expect((await getEventsByType(EventType.HANDOFF_TO_CONSULTANT)).length).toBe(1);
   });
@@ -462,7 +460,7 @@ describe('Group message convergence and semantic routing', () => {
   describe('group convergence handoff notifies fallback admin only', () => {
     it('high-risk question notifies only fallback admin', async () => {
       const result = await processMessage(groupMsg(TEST_CUSTOMER, '儲值餘額異常怎麼辦'));
-      expectFallbackAdminOnlyHandoff(result.replies);
+      expectNoPushHandoffNotification(result.replies);
       await expectFallbackAdminOnlyPendingHandoffs();
     });
 
@@ -470,13 +468,13 @@ describe('Group message convergence and semantic routing', () => {
       const result = await processMessage(
         groupMsg(TEST_CUSTOMER, '請問客立樂 xyz 特殊功能要怎麼設定')
       );
-      expectFallbackAdminOnlyHandoff(result.replies);
+      expectNoPushHandoffNotification(result.replies);
       await expectFallbackAdminOnlyPendingHandoffs();
     });
 
     it('mid/high risk matched card notifies only fallback admin', async () => {
       const result = await processMessage(groupMsg(TEST_CUSTOMER, '畫面一片空白'));
-      expectFallbackAdminOnlyHandoff(result.replies);
+      expectNoPushHandoffNotification(result.replies);
       await expectFallbackAdminOnlyPendingHandoffs();
     });
 
@@ -501,7 +499,7 @@ describe('Group message convergence and semantic routing', () => {
       });
 
       const result = await processMessage(groupMsg(TEST_CUSTOMER, '還是不清楚'));
-      expectFallbackAdminOnlyHandoff(result.replies);
+      expectNoPushHandoffNotification(result.replies);
       await expectFallbackAdminOnlyPendingHandoffs();
     });
 
@@ -510,8 +508,7 @@ describe('Group message convergence and semantic routing', () => {
       const pushUserIds = result.replies
         .filter((reply) => reply.type === 'push')
         .map((reply) => reply.userId);
-      expect(pushUserIds).toEqual([TEST_ADMIN]);
-      expect(pushUserIds).not.toContain(TEST_CONSULTANT);
+      expect(pushUserIds).toEqual([]);
     });
   });
 });
