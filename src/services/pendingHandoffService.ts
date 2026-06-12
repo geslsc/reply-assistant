@@ -98,7 +98,30 @@ export function isViewPendingHandoffsPhrase(text: string): boolean {
 }
 
 export function isSnoozeHandoffPhrase(text: string): boolean {
-  return text.trim() === '稍後處理';
+  return parsePendingHandoffAction(text)?.action === 'snooze';
+}
+
+export type PendingHandoffAction = 'snooze' | 'resolve' | 'ignore';
+
+const Q_CODE_PATTERN = /Q-\d{8}-\d{4}-[A-Z0-9]{2}/u;
+
+export function parsePendingHandoffAction(
+  text: string
+): { action: PendingHandoffAction; shortCode?: string } | null {
+  const trimmed = text.trim();
+  const shortCode = trimmed.match(Q_CODE_PATTERN)?.[0];
+  const command = shortCode ? trimmed.replace(shortCode, '').trim() : trimmed;
+
+  if (/^(稍後處理|晚點處理|稍後再看)$/u.test(command)) {
+    return { action: 'snooze', shortCode };
+  }
+  if (/^(已處理|處理完成|完成|結案)$/u.test(command)) {
+    return { action: 'resolve', shortCode };
+  }
+  if (/^(不處理|略過|忽略|先不用)$/u.test(command)) {
+    return { action: 'ignore', shortCode };
+  }
+  return null;
 }
 
 export function formatHandoffStatusLabel(handoff: PendingHandoff): string {
@@ -153,6 +176,44 @@ export async function handleSnoozeHandoff(
   ];
 }
 
+export async function handleResolveHandoff(
+  consultantId: string,
+  shortCode?: string
+): Promise<BotReply[]> {
+  const { handoff, error } = await resolveTargetOpenHandoff(consultantId, shortCode);
+  if (!handoff || error) {
+    return [{ type: 'push', userId: consultantId, text: error ?? '無法標記已處理。' }];
+  }
+
+  await closePendingHandoff(handoff.id, consultantId);
+  return [
+    {
+      type: 'push',
+      userId: consultantId,
+      text: `已將待處理問題 ${handoff.shortCode} 標記為已處理，之後不會再出現在待處理清單。`,
+    },
+  ];
+}
+
+export async function handleIgnoreHandoff(
+  consultantId: string,
+  shortCode?: string
+): Promise<BotReply[]> {
+  const { handoff, error } = await resolveTargetOpenHandoff(consultantId, shortCode);
+  if (!handoff || error) {
+    return [{ type: 'push', userId: consultantId, text: error ?? '無法略過這筆待處理問題。' }];
+  }
+
+  await markHandoffIgnored(handoff.id, consultantId, 'manual_ignore');
+  return [
+    {
+      type: 'push',
+      userId: consultantId,
+      text: `已略過待處理問題 ${handoff.shortCode}，之後不會再出現在待處理清單。`,
+    },
+  ];
+}
+
 export async function handleViewPendingHandoffs(userId: string): Promise<BotReply[]> {
   const handoffs = await getOpenPendingHandoffs(userId);
   if (handoffs.length === 0) {
@@ -170,13 +231,14 @@ export async function handleViewPendingHandoffs(userId: string): Promise<BotRepl
       `目前狀態：${formatHandoffStatusLabel(handoff)}`,
       '可用操作：',
       `- 輸入短碼查看詳情：${handoff.shortCode}`,
-      '- 稍後處理',
-      '- 不處理 / 略過',
-      '- 整理成知識卡草稿',
+      `- 稍後處理：${handoff.shortCode} 稍後處理`,
+      `- 標記已處理：${handoff.shortCode} 已處理`,
+      `- 略過：${handoff.shortCode} 不處理`,
+      `- 整理成知識卡草稿：${handoff.shortCode} 整理成知識卡：貼上你的建議回答`,
       ''
     );
   }
-  lines.push('輸入問題短碼可查看詳情並撰寫回覆草稿（私訊）。');
+  lines.push('提醒：「已處理」或「不處理」會讓問題從待處理清單消失。');
   return [{ type: 'push', userId, text: lines.join('\n') }];
 }
 
@@ -197,10 +259,12 @@ export function buildHandoffPrivateCard(params: {
     '',
     '【可回覆選項】',
     `- 輸入短碼查看詳情：${params.shortCode}`,
-    '- 不處理 / 稍後處理：回覆「稍後處理」',
-    '- 若稍後處理，之後可輸入「查看待處理問題」叫回清單',
+    `- 稍後處理：${params.shortCode} 稍後處理`,
+    `- 標記已處理：${params.shortCode} 已處理`,
+    `- 略過：${params.shortCode} 不處理`,
+    `- 整理成知識卡草稿：${params.shortCode} 整理成知識卡：貼上你的建議回答`,
     '',
-    '※ 回覆草稿請透過私訊撰寫，系統會以 replyMessage 提供草稿。',
+    '※「已處理」或「不處理」會讓這筆問題從待處理清單消失。',
   ].join('\n');
 }
 

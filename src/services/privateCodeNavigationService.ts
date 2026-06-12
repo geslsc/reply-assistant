@@ -53,8 +53,10 @@ export async function handleBareCodeLookup(userId: string, code: string): Promis
           '您可以回覆：',
           `- 輸入短碼查看詳情：${handoff.shortCode}`,
           `- ${handoff.shortCode} 稍後處理`,
+          `- ${handoff.shortCode} 已處理`,
+          `- ${handoff.shortCode} 不處理`,
           `- ${handoff.shortCode} 整理成知識卡`,
-          '- 於私訊撰寫回覆草稿（replyMessage）',
+          `- ${handoff.shortCode} 整理成知識卡：貼上你的建議回答`,
         ].join('\n'),
       },
     ];

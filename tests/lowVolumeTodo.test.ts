@@ -10,6 +10,8 @@ import {
 import {
   createPendingHandoff,
   getPendingHandoffs,
+  handleIgnoreHandoff,
+  handleResolveHandoff,
   handleSnoozeHandoff,
   invalidatePendingHandoff,
   invalidatePendingHandoffsByGroup,
@@ -218,6 +220,34 @@ describe('low volume todo query type', () => {
       const handoffs = await getPendingHandoffs(TEST_CONSULTANT);
       expect(handoffs[0].status).toBe(PendingHandoffStatus.IN_PROGRESS);
       expect(handoffs[0].snoozed).toBe(true);
+    });
+
+    it('listed pending handoff actions resolve or ignore by short code', async () => {
+      const thread = await createIssueThread(TEST_GROUP, 'Q');
+      const resolved = await createPendingHandoff({
+        consultantId: TEST_CONSULTANT,
+        issueThreadId: thread.issueThreadId,
+        groupId: TEST_GROUP,
+        shortCode: 'Q-20260611-0300-C4',
+        customerQuestion: 'Q1',
+      });
+      const ignored = await createPendingHandoff({
+        consultantId: TEST_CONSULTANT,
+        issueThreadId: thread.issueThreadId,
+        groupId: TEST_GROUP,
+        shortCode: 'Q-20260611-0300-C5',
+        customerQuestion: 'Q2',
+      });
+
+      const resolveReplies = await handleResolveHandoff(TEST_CONSULTANT, resolved.shortCode);
+      const ignoreReplies = await handleIgnoreHandoff(TEST_CONSULTANT, ignored.shortCode);
+
+      expect(resolveReplies[0].text).toContain('不會再出現在待處理清單');
+      expect(ignoreReplies[0].text).toContain('不會再出現在待處理清單');
+      const all = await getPendingHandoffs(TEST_CONSULTANT);
+      expect(all.find((h) => h.id === resolved.id)?.status).toBe(PendingHandoffStatus.RESOLVED);
+      expect(all.find((h) => h.id === ignored.id)?.status).toBe(PendingHandoffStatus.IGNORED);
+      expect(all.find((h) => h.id === ignored.id)?.reason).toBe('manual_ignore');
     });
   });
 

@@ -235,7 +235,7 @@ describe('LINE Reply / Push Tests', () => {
     const result = await processMessage({
       userId: TEST_CUSTOMER,
       groupId: TEST_GROUP,
-      text: '我的官方 line 串接好了，要怎麼讓客人預約？',
+      text: '儲值餘額異常怎麼辦',
       isGroup: true,
     });
     await deliverBotReplies(result.replies, 'reply-token');
@@ -254,6 +254,6 @@ describe('LINE Reply / Push Tests', () => {
 
     const fallback = await handleViewPendingHandoffs(TEST_ADMIN);
     expect(fallback[0].text).toContain('【待處理問題清單】');
-    expect(fallback[0].text).toContain('我的官方 line 串接好了');
+    expect(fallback[0].text).toContain('儲值餘額異常');
   });
 });

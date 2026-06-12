@@ -169,13 +169,13 @@ describe('Knowledge card draft mode and UX', () => {
   it('human readable draft hides internal field names', () => {
     const text = formatHumanReadableKnowledgeCard(checkoutTutorialCard, { draftMode: 'create' });
     expect(text).toMatch(/【知識卡草稿｜新增】/);
-    expect(text).toMatch(/建議回覆內容：/);
+    expect(text).toMatch(/建議回覆：/);
     expect(text).not.toMatch(/patterns/);
     expect(text).not.toMatch(/risk_level/);
     expect(text).not.toMatch(/can_public_reply/);
   });
 
-  it('human readable draft shows enhanced card fields', () => {
+  it('human readable draft shows compact enhanced fields for consultants', () => {
     const text = formatHumanReadableKnowledgeCard(
       withEnhancedKnowledgeFields({
         ...checkoutTutorialCard,
@@ -192,6 +192,36 @@ describe('Knowledge card draft mode and UX', () => {
         },
       }),
       { draftMode: 'create' }
+    );
+
+    expect(text).toMatch(/適用：/);
+    expect(text).toMatch(/不適用：/);
+    expect(text).toMatch(/需要導入教練：/);
+    expect(text).toMatch(/來源依據：/);
+    expect(text).toMatch(/已保留顧問原文供系統驗證/);
+    expect(text).not.toMatch(/匹配特徵：/);
+    expect(text).not.toMatch(/顧問原文：到「結帳」→「新增結帳單」。/);
+    expect(text).not.toMatch(/match_features/);
+    expect(text).not.toMatch(/source_consultant_input/);
+  });
+
+  it('admin human readable draft shows detailed enhanced card fields', () => {
+    const text = formatHumanReadableKnowledgeCard(
+      withEnhancedKnowledgeFields({
+        ...checkoutTutorialCard,
+        core_question: '如何新增結帳單？',
+        match_features: ['新增結帳單', '結帳操作'],
+        applicability_rules: ['店家詢問新增結帳單入口或操作步驟'],
+        exclusion_rules: ['店家詢問實際付款或入帳狀態'],
+        reasoning: '這張卡只適用操作教學，不處理帳務個案。',
+        handoff_conditions: ['涉及金額、付款、入帳狀態時導入教練'],
+        source_consultant_input: {
+          customer_question: '怎麼新增結帳單',
+          consultant_reply: '到「結帳」→「新增結帳單」。',
+          raw_input: '店家問題：怎麼新增結帳單\n建議回覆：到「結帳」→「新增結帳單」。',
+        },
+      }),
+      { draftMode: 'create', isAdmin: true }
     );
 
     expect(text).toMatch(/匹配特徵：/);

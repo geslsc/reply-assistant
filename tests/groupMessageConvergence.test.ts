@@ -140,15 +140,22 @@ describe('Group message convergence and semantic routing', () => {
     expect(text).toContain('畫面一片空白');
   });
 
-  it('handoffs with suggest-new-card when clear but no matching card', async () => {
+  it('clarifies an operational question before handoff when no matching card exists', async () => {
     const result = await processMessage(
       groupMsg(TEST_CUSTOMER, '請問客立樂 xyz 特殊功能要怎麼設定')
     );
-    expect(result.replies.find((r) => r.type === 'group')?.text).toBe(
-      CUSTOMER_HANDOFF_BUFFER_MESSAGE
-    );
-    const handoffEvents = await getEventsByType(EventType.HANDOFF_TO_CONSULTANT);
-    expect(handoffEvents[0]?.detail).toContain('建議整理新卡');
+    const groupText = result.replies.find((r) => r.type === 'group')?.text ?? '';
+    expect(groupText).toContain('補充');
+    expect(groupText).not.toBe(CUSTOMER_HANDOFF_BUFFER_MESSAGE);
+    expect(await getEventsByType(EventType.HANDOFF_TO_CONSULTANT)).toHaveLength(0);
+  });
+
+  it('clarifies stored value wording before handing off unknown card misses', async () => {
+    const result = await processMessage(groupMsg(TEST_CUSTOMER, '我要怎麼設定儲值？'));
+    const groupText = result.replies.find((r) => r.type === 'group')?.text ?? '';
+    expect(groupText).toContain('儲值');
+    expect(groupText).toContain('入帳');
+    expect(groupText).not.toBe(CUSTOMER_HANDOFF_BUFFER_MESSAGE);
   });
 
   it('does not ask for screenshot when intent is clear for punch card topic', async () => {
@@ -523,12 +530,14 @@ describe('Group message convergence and semantic routing', () => {
       await expectFallbackAdminOnlyPendingHandoffs();
     });
 
-    it('clear question without matching card notifies only fallback admin', async () => {
+    it('clear operational question without matching card clarifies before fallback admin', async () => {
       const result = await processMessage(
         groupMsg(TEST_CUSTOMER, '請問客立樂 xyz 特殊功能要怎麼設定')
       );
       expectNoPushHandoffNotification(result.replies);
-      await expectFallbackAdminOnlyPendingHandoffs();
+      const groupText = result.replies.find((r) => r.type === 'group')?.text ?? '';
+      expect(groupText).toContain('補充');
+      expect(await getPendingHandoffs(TEST_ADMIN)).toHaveLength(0);
     });
 
     it('mid/high risk matched card notifies only fallback admin', async () => {

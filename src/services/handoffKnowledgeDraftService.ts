@@ -46,7 +46,10 @@ export function getHandoffReplyContextByShortCode(
 
 export function parseOrganizeFromHandoffPhrase(
   text: string
-): { mode: 'recent' } | { mode: 'shortCode'; shortCode: string } | null {
+):
+  | { mode: 'recent' }
+  | { mode: 'shortCode'; shortCode: string; replyText?: string }
+  | null {
   const trimmed = text.trim();
   if (
     trimmed === '把剛剛代回整理成知識卡' ||
@@ -55,9 +58,15 @@ export function parseOrganizeFromHandoffPhrase(
   ) {
     return { mode: 'recent' };
   }
-  const shortCodeMatch = trimmed.match(/^(Q-\d{8}-\d{4}-[A-Z0-9]{2})\s*整理成知識卡$/u);
+  const shortCodeMatch = trimmed.match(
+    /^(Q-\d{8}-\d{4}-[A-Z0-9]{2})\s*整理成知識卡(?:[:：]\s*(.+))?$/u
+  );
   if (shortCodeMatch) {
-    return { mode: 'shortCode', shortCode: shortCodeMatch[1] };
+    return {
+      mode: 'shortCode',
+      shortCode: shortCodeMatch[1],
+      replyText: shortCodeMatch[2]?.trim(),
+    };
   }
   return null;
 }

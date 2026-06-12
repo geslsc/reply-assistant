@@ -31,6 +31,7 @@ import {
   matchesConfirmUpdateCommand,
 } from './knowledgeCardWriteService';
 import {
+  findOpenHandoffByShortCode,
   handleViewPendingHandoffs,
   isViewPendingHandoffsPhrase,
 } from './pendingHandoffService';
@@ -56,6 +57,7 @@ import {
 } from './knowledgeCardPublicReplyService';
 import { PublicReplyPreference } from '../repositories/dmSessionTypes';
 import type { MemoryDmSessionRepository } from '../repositories/memoryDmSessionRepository';
+import { getGroupDisplayName } from './lineGroupSummaryService';
 
 export interface DmSessionMessageContext {
   userId: string;
@@ -558,7 +560,27 @@ async function handleOrganizeFromHandoff(ctx: DmSessionMessageContext): Promise<
       ? peekHandoffReplyContext(ctx.userId)
       : getHandoffReplyContextByShortCode(ctx.userId, parsed.shortCode);
 
+  if (!context && parsed.mode === 'shortCode' && parsed.replyText) {
+    const handoff = await findOpenHandoffByShortCode(ctx.userId, parsed.shortCode);
+    if (handoff) {
+      context = {
+        groupId: handoff.groupId,
+        groupName: await getGroupDisplayName(handoff.groupId),
+        shortCode: handoff.shortCode,
+        customerQuestion: handoff.customerQuestion ?? '（無摘要）',
+        replyText: parsed.replyText,
+        storedAt: nowIso(),
+      };
+    }
+  }
+
   if (!context) {
+    if (parsed.mode === 'shortCode' && !parsed.replyText) {
+      return pushReply(
+        ctx.userId,
+        `請在短碼後補上你的建議回答，例如：\n${parsed.shortCode} 整理成知識卡：請店家到設定頁面調整。`
+      );
+    }
     return pushReply(ctx.userId, ORGANIZE_FROM_HANDOFF_NOT_FOUND_MESSAGE);
   }
 

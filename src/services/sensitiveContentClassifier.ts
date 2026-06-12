@@ -23,6 +23,12 @@ export const OPERATION_TUTORIAL_PATTERNS: RegExp[] = [
 
 /** 儲值卡操作教學：可公開，不因「儲值」二字本身判為硬紅線 */
 export const STORED_VALUE_TUTORIAL_PATTERNS: RegExp[] = [
+  /如何設定儲值/u,
+  /怎麼設定儲值/u,
+  /設定儲值/u,
+  /儲值.*設定/u,
+  /儲值.*開啟/u,
+  /儲值.*關閉/u,
   /如何設定儲值卡/u,
   /怎麼設定儲值卡/u,
   /如何建立儲值卡/u,

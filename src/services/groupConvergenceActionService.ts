@@ -60,6 +60,60 @@ import {
 
 const MAX_CLARIFY_ROUNDS = 3;
 
+const OPERATIONAL_QUESTION_PATTERN =
+  /(怎麼|如何|在哪|哪裡|設定|新增|調整|修改|開啟|關閉|建立|操作|使用|預約|服務項目|價格|店家資料|logo|儲值|票券|會員|結帳|後台)/u;
+
+function isLikelyOperationalQuestion(question: string): boolean {
+  const trimmed = question.trim();
+  if (trimmed.length < 4) {
+    return false;
+  }
+  return OPERATIONAL_QUESTION_PATTERN.test(trimmed);
+}
+
+function buildNoCandidateClarifyQuestion(question: string, clarifyRound: number): string {
+  if (/儲值/u.test(question)) {
+    return [
+      '我想先確認一下，你問的「儲值」比較接近哪一種情況？',
+      '',
+      '請補充你現在想處理的是：設定或開啟儲值卡功能、建立儲值方案或規則，還是某筆儲值金額 / 入帳 / 退款 / 交易狀態。',
+      '',
+      '如果是實際金額、入帳、退款或交易個案，我會整理給導入教練確認喔。',
+    ].join('\n');
+  }
+
+  if (clarifyRound <= 1) {
+    return [
+      '我想先確認一下你要操作的情境。',
+      '',
+      '可以補充你現在在哪個畫面、想設定什麼功能，或目前卡在哪一步嗎？',
+    ].join('\n');
+  }
+
+  return [
+    '我還需要再確認一點細節，才不會回錯方向。',
+    '',
+    '請補充你看到的畫面名稱、按鈕名稱，或你原本想完成的動作。',
+  ].join('\n');
+}
+
+async function clarifyUnknownOperationalQuestion(params: {
+  groupId: string;
+  issueThreadId: string;
+  question: string;
+  clarifyRound: number;
+}): Promise<BotReply[]> {
+  return applyClarify({
+    groupId: params.groupId,
+    issueThreadId: params.issueThreadId,
+    question: buildNoCandidateClarifyQuestion(params.question, params.clarifyRound),
+    clarifyRound: params.clarifyRound,
+    convergenceState: {
+      candidateCardIds: [],
+    },
+  });
+}
+
 function withCustomerBufferMessage(replies: BotReply[]): BotReply[] {
   const hasBuffer = replies.some(
     (r) => r.type === 'group' && r.text === CUSTOMER_HANDOFF_BUFFER_MESSAGE
@@ -372,12 +426,20 @@ export async function applySemanticClassification(params: {
     }
 
     if (candidates.length === 0) {
-      if (clarifyRound === 0 && isVagueGroupQuestion(params.question)) {
+      if (clarifyRound < MAX_CLARIFY_ROUNDS && isVagueGroupQuestion(params.question)) {
         return startConvergenceRound1({
           groupId: params.groupId,
           issueThreadId: params.issueThreadId,
           question: params.question,
           candidates: [],
+          clarifyRound,
+        });
+      }
+      if (clarifyRound < MAX_CLARIFY_ROUNDS && isLikelyOperationalQuestion(params.question)) {
+        return clarifyUnknownOperationalQuestion({
+          groupId: params.groupId,
+          issueThreadId: params.issueThreadId,
+          question: params.question,
           clarifyRound,
         });
       }
@@ -442,6 +504,17 @@ export async function applySemanticClassification(params: {
       actor_user_id: params.customerUserId,
       detail: params.question,
     });
+    if (
+      clarifyRound < MAX_CLARIFY_ROUNDS &&
+      isLikelyOperationalQuestion(params.question)
+    ) {
+      return clarifyUnknownOperationalQuestion({
+        groupId: params.groupId,
+        issueThreadId: params.issueThreadId,
+        question: params.question,
+        clarifyRound,
+      });
+    }
     return applyHandoff({
       groupId: params.groupId,
       issueThreadId: params.issueThreadId,
@@ -579,6 +652,18 @@ export async function applyClarifyFollowUp(params: {
 
     const candidates = await resolveCandidatesFromState(combined, convergenceState);
     if (candidates.length === 0) {
+      if (
+        clarifyRound < MAX_CLARIFY_ROUNDS &&
+        isLikelyOperationalQuestion(combined) &&
+        !isNoInformationReply(params.followUpText)
+      ) {
+        return clarifyUnknownOperationalQuestion({
+          groupId: params.groupId,
+          issueThreadId: params.issueThreadId,
+          question: combined,
+          clarifyRound,
+        });
+      }
       return applyHandoff({
         groupId: params.groupId,
         issueThreadId: params.issueThreadId,

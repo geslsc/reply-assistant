@@ -482,6 +482,7 @@ export function formatHumanReadableKnowledgeCard(
   card: KnowledgeCard,
   options?: HumanReadableDraftOptions
 ): string {
+  const isAdmin = options?.isAdmin ?? false;
   const lines: string[] = [
     ...buildDraftHeader(options),
     '',
@@ -495,14 +496,23 @@ export function formatHumanReadableKnowledgeCard(
     ...card.patterns.map((pattern) => `- ${pattern}`),
   ];
 
-  pushListSection(lines, '匹配特徵：', card.match_features);
-  pushListSection(lines, '適用規則：', card.applicability_rules);
-  pushListSection(lines, '排除規則：', card.exclusion_rules);
-  pushTextSection(lines, '推理說明：', card.reasoning);
-  pushListSection(lines, '導入條件：', card.handoff_conditions);
-  pushSourceConsultantInputSection(lines, card.source_consultant_input);
+  if (isAdmin) {
+    pushListSection(lines, '匹配特徵：', card.match_features);
+    pushListSection(lines, '適用規則：', card.applicability_rules);
+    pushListSection(lines, '排除規則：', card.exclusion_rules);
+    pushTextSection(lines, '推理說明：', card.reasoning);
+    pushListSection(lines, '導入條件：', card.handoff_conditions);
+    pushSourceConsultantInputSection(lines, card.source_consultant_input);
+  } else {
+    pushListSection(lines, '適用：', card.applicability_rules);
+    pushListSection(lines, '不適用：', card.exclusion_rules);
+    pushListSection(lines, '需要導入教練：', card.handoff_conditions);
+    if (card.source_consultant_input) {
+      lines.push('', '來源依據：', '已保留顧問原文供系統驗證，不展開顯示。');
+    }
+  }
 
-  lines.push('', '建議回覆內容：', card.standard_answer);
+  lines.push('', isAdmin ? '建議回覆內容：' : '建議回覆：', card.standard_answer);
 
   if (card.not_applicable.length > 0) {
     lines.push('', '不適用情況：', ...card.not_applicable.map((item) => `- ${item}`));

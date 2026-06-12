@@ -10,8 +10,10 @@ import {
 } from './knowledgeCardImportService';
 import { parseViewCommand, handleViewCommand, parseKnowledgeSearchQuery, handleKnowledgeSearchCommand } from './knowledgeCardViewService';
 import {
+  handleIgnoreHandoff,
+  handleResolveHandoff,
   handleSnoozeHandoff,
-  isSnoozeHandoffPhrase,
+  parsePendingHandoffAction,
 } from './pendingHandoffService';
 import { isRoundQuietPhrase } from './roundQuietService';
 import {
@@ -61,11 +63,18 @@ export async function handleKnowledgeCardCommand(
     ];
   }
 
-  if (isSnoozeHandoffPhrase(trimmed)) {
+  const handoffAction = parsePendingHandoffAction(trimmed);
+  if (handoffAction) {
     if (!(await isActiveConsultantOrAdmin(ctx.userId))) {
       return null;
     }
-    return handleSnoozeHandoff(ctx.userId);
+    if (handoffAction.action === 'snooze') {
+      return handleSnoozeHandoff(ctx.userId, handoffAction.shortCode);
+    }
+    if (handoffAction.action === 'resolve') {
+      return handleResolveHandoff(ctx.userId, handoffAction.shortCode);
+    }
+    return handleIgnoreHandoff(ctx.userId, handoffAction.shortCode);
   }
 
   const searchQuery = parseKnowledgeSearchQuery(trimmed);
