@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { BotReply } from '../types';
 import { getEnv } from '../config/env';
+import { logger } from '../config/logger';
 import { getRepos } from '../repositories';
 import { DmSessionDraftData, DmSessionRecord } from '../repositories/dmSessionTypes';
 import { KnowledgeCard } from '../schemas/knowledgeCardSchema';
@@ -111,6 +112,8 @@ const AMBIGUOUS_ACTIVE_SESSION_HINT =
   '草稿已暫停，需要時可輸入「補充：…」或「完成」。';
 const UNRELATED_ACTIVE_SESSION_HINT =
   '目前仍在整理草稿中。請提供知識卡內容，或使用「補充：…」「修改：…」「重新整理」「轉成 JSON」「完成」或「取消」。';
+const DRAFT_GENERATION_FAILED_MESSAGE =
+  '草稿產生時遇到暫時性錯誤，我已保留目前整理流程。請稍後輸入「重新整理」再試一次，或用「補充：…」縮短/補充內容。';
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -429,7 +432,20 @@ async function processContentIntoDraft(
     consultantRequest: content,
     existingCard,
     sessionContext: buildSessionContext(session, isAdmin),
+  }).catch((error) => {
+    logger.warn('Knowledge draft generation failed; preserving active dm session', {
+      userId,
+      sessionId: session.sessionId,
+      operation,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
   });
+
+  if (!result) {
+    suppressPrivateFallbackForUser(userId);
+    return pushReply(userId, DRAFT_GENERATION_FAILED_MESSAGE);
+  }
 
   return applyDraftResult(userId, session, result, inputNotes ?? session.draftData?.inputNotes);
 }

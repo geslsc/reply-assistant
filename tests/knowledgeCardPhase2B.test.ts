@@ -106,6 +106,25 @@ describe('Knowledge card Phase 2-B dm_sessions flow', () => {
     expect(session?.draftData?.humanReadableDraft).toMatch(/登入問題/);
   });
 
+  it('3a. draft generation errors reply with retry guidance and keep session active', async () => {
+    setLlmClient({
+      complete: jest.fn().mockRejectedValue(new Error('OpenAI timeout')),
+    });
+    await handleDmSessionPrivateMessage({ userId: TEST_CONSULTANT, text: '幫我整理知識卡' });
+
+    const replies = await handleDmSessionPrivateMessage({
+      userId: TEST_CONSULTANT,
+      text: [
+        '店家問題：客人資料和會員可以匯入嗎？',
+        '建議回覆：可以用匯入方式先把客戶資料匯入。',
+        '操作步驟：到顧客管理下載範例 excel 後再匯入。',
+      ].join('\n'),
+    });
+
+    expect(replies?.[0].text).toContain('草稿產生時遇到暫時性錯誤');
+    expect((await getRepos().dmSessions.findActiveByUserId(TEST_CONSULTANT))?.status).toBe('active');
+  });
+
   it('4. insufficient content asks for more without storing draft_data', async () => {
     await handleDmSessionPrivateMessage({ userId: TEST_CONSULTANT, text: '幫我整理知識卡' });
     const replies = await handleDmSessionPrivateMessage({

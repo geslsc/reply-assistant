@@ -205,7 +205,7 @@ describe('Knowledge card draft mode and UX', () => {
     expect(text).not.toMatch(/source_consultant_input/);
   });
 
-  it('admin human readable draft shows detailed enhanced card fields', () => {
+  it('admin human readable draft also uses compact display and keeps full data behind JSON', () => {
     const text = formatHumanReadableKnowledgeCard(
       withEnhancedKnowledgeFields({
         ...checkoutTutorialCard,
@@ -224,14 +224,15 @@ describe('Knowledge card draft mode and UX', () => {
       { draftMode: 'create', isAdmin: true }
     );
 
-    expect(text).toMatch(/匹配特徵：/);
-    expect(text).toMatch(/- 新增結帳單/);
-    expect(text).toMatch(/適用規則：/);
-    expect(text).toMatch(/排除規則：/);
-    expect(text).toMatch(/推理說明：/);
-    expect(text).toMatch(/導入條件：/);
-    expect(text).toMatch(/來源資料：/);
-    expect(text).toMatch(/顧問原文：到「結帳」→「新增結帳單」。/);
+    expect(text).toMatch(/適用：/);
+    expect(text).toMatch(/不適用：/);
+    expect(text).toMatch(/需要導入教練：/);
+    expect(text).toMatch(/來源依據：/);
+    expect(text).toMatch(/轉成 JSON/);
+    expect(text).not.toMatch(/匹配特徵：/);
+    expect(text).not.toMatch(/推理說明：/);
+    expect(text).not.toMatch(/來源資料：/);
+    expect(text).not.toMatch(/顧問原文：到「結帳」→「新增結帳單」。/);
     expect(text).not.toMatch(/match_features/);
     expect(text).not.toMatch(/source_consultant_input/);
   });

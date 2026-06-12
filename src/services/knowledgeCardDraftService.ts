@@ -447,44 +447,17 @@ function pushListSection(lines: string[], title: string, items: string[] | null 
   lines.push('', title, ...cleanItems.map((item) => `- ${item}`));
 }
 
-function pushTextSection(lines: string[], title: string, text: string | null | undefined): void {
-  const trimmed = text?.trim();
-  if (!trimmed) {
-    return;
-  }
-  lines.push('', title, trimmed);
-}
-
-function pushSourceConsultantInputSection(
-  lines: string[],
-  source: SourceConsultantInput | null | undefined
-): void {
-  if (!source) {
-    return;
-  }
-
-  const sourceLines: string[] = [];
-  if (source.customer_question?.trim()) {
-    sourceLines.push(`店家問題：${source.customer_question.trim()}`);
-  }
-  if (source.consultant_reply?.trim()) {
-    sourceLines.push(`顧問原文：${source.consultant_reply.trim()}`);
-  }
-  if (source.raw_input?.trim()) {
-    sourceLines.push(`原始輸入：${source.raw_input.trim()}`);
-  }
-  if (sourceLines.length > 0) {
-    lines.push('', '來源資料：', ...sourceLines);
-  }
-}
-
 export function formatHumanReadableKnowledgeCard(
   card: KnowledgeCard,
   options?: HumanReadableDraftOptions
 ): string {
-  const isAdmin = options?.isAdmin ?? false;
   const lines: string[] = [
     ...buildDraftHeader(options),
+    '',
+    '草稿編號：',
+    options?.draftMode === 'update' && options.targetCardId
+      ? formatCardDisplayId(options.targetCardId)
+      : '正式送審或上線後產生',
     '',
     '主題：',
     card.title,
@@ -496,23 +469,14 @@ export function formatHumanReadableKnowledgeCard(
     ...card.patterns.map((pattern) => `- ${pattern}`),
   ];
 
-  if (isAdmin) {
-    pushListSection(lines, '匹配特徵：', card.match_features);
-    pushListSection(lines, '適用規則：', card.applicability_rules);
-    pushListSection(lines, '排除規則：', card.exclusion_rules);
-    pushTextSection(lines, '推理說明：', card.reasoning);
-    pushListSection(lines, '導入條件：', card.handoff_conditions);
-    pushSourceConsultantInputSection(lines, card.source_consultant_input);
-  } else {
-    pushListSection(lines, '適用：', card.applicability_rules);
-    pushListSection(lines, '不適用：', card.exclusion_rules);
-    pushListSection(lines, '需要導入教練：', card.handoff_conditions);
-    if (card.source_consultant_input) {
-      lines.push('', '來源依據：', '已保留顧問原文供系統驗證，不展開顯示。');
-    }
+  pushListSection(lines, '適用：', card.applicability_rules);
+  pushListSection(lines, '不適用：', card.exclusion_rules);
+  pushListSection(lines, '需要導入教練：', card.handoff_conditions);
+  if (card.source_consultant_input) {
+    lines.push('', '來源依據：', '已保留顧問原文供系統驗證；短版草稿不展開顯示。');
   }
 
-  lines.push('', isAdmin ? '建議回覆內容：' : '建議回覆：', card.standard_answer);
+  lines.push('', '建議回覆：', card.standard_answer);
 
   if (card.not_applicable.length > 0) {
     lines.push('', '不適用情況：', ...card.not_applicable.map((item) => `- ${item}`));
@@ -535,6 +499,7 @@ export function formatHumanReadableKnowledgeCard(
     })
   );
   lines.push('', formatDraftActionHints(options?.isAdmin ?? false));
+  lines.push('', '完整欄位：', '輸入「轉成 JSON」可查看匹配特徵、適用/排除規則、推理說明與來源資料。');
   return lines.join('\n');
 }
 

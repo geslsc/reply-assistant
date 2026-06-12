@@ -1,4 +1,9 @@
-import { deliverBotReplies, mergeGroupReplies, setLineMessageClient } from '../src/services/lineMessageService';
+import {
+  deliverBotReplies,
+  mergeGroupReplies,
+  setLineMessageClient,
+  splitLineText,
+} from '../src/services/lineMessageService';
 import {
   registerAdmin,
   registerInviteCode,
@@ -12,6 +17,14 @@ import { handleViewPendingHandoffs } from '../src/services/pendingHandoffService
 import { TEST_ADMIN, TEST_CONSULTANT, TEST_CUSTOMER, TEST_GROUP } from './helpers/testSetup';
 
 describe('LINE Reply / Push Tests', () => {
+  it('splits long text into LINE-safe chunks', () => {
+    const chunks = splitLineText(['第一段', '第二段'.repeat(3000)].join('\n\n'), 1000);
+
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.every((chunk) => chunk.length <= 1000)).toBe(true);
+    expect(chunks.join('').replace(/\s/g, '')).toContain('第一段第二段');
+  });
+
   it('uses replyMessage for low-risk public answer', async () => {
     const replyText = jest.fn().mockResolvedValue(undefined);
     const pushText = jest.fn().mockResolvedValue(null);

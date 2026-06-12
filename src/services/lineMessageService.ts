@@ -13,6 +13,48 @@ export interface LineMessageClient {
 }
 
 let lineClient: LineMessageClient | null = null;
+const LINE_TEXT_LIMIT = 4500;
+const LINE_MAX_MESSAGES_PER_REQUEST = 5;
+
+export function splitLineText(text: string, limit = LINE_TEXT_LIMIT): string[] {
+  if (text.length <= limit) {
+    return [text];
+  }
+
+  const chunks: string[] = [];
+  let remaining = text;
+  while (remaining.length > limit) {
+    const window = remaining.slice(0, limit + 1);
+    const breakAt = Math.max(
+      window.lastIndexOf('\n\n'),
+      window.lastIndexOf('\n'),
+      window.lastIndexOf('。'),
+      window.lastIndexOf('，')
+    );
+    const cutAt = breakAt > Math.floor(limit * 0.6) ? breakAt + 1 : limit;
+    chunks.push(remaining.slice(0, cutAt).trimEnd());
+    remaining = remaining.slice(cutAt).trimStart();
+  }
+  if (remaining.length > 0) {
+    chunks.push(remaining);
+  }
+  return chunks;
+}
+
+function toTextMessages(text: string): { type: 'text'; text: string }[] {
+  return splitLineText(text).map((chunk, index, all) => ({
+    type: 'text' as const,
+    text: all.length > 1 ? `(${index + 1}/${all.length})\n${chunk}` : chunk,
+  }));
+}
+
+function chunkMessages<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
 
 function createRealClient(): LineMessageClient {
   const env = getEnv();
@@ -25,17 +67,22 @@ function createRealClient(): LineMessageClient {
 
   return {
     async replyText(replyToken, text) {
+      const messages = toTextMessages(text).slice(0, LINE_MAX_MESSAGES_PER_REQUEST);
       await client.replyMessage({
         replyToken,
-        messages: [{ type: 'text', text }],
+        messages,
       });
     },
     async pushText(userId, text) {
-      const response = await client.pushMessage({
-        to: userId,
-        messages: [{ type: 'text', text }],
-      });
-      return response.sentMessages?.[0]?.id ?? null;
+      let firstMessageId: string | null = null;
+      for (const messages of chunkMessages(toTextMessages(text), LINE_MAX_MESSAGES_PER_REQUEST)) {
+        const response = await client.pushMessage({
+          to: userId,
+          messages,
+        });
+        firstMessageId ??= response.sentMessages?.[0]?.id ?? null;
+      }
+      return firstMessageId;
     },
   };
 }
