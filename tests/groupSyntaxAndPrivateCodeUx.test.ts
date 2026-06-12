@@ -4,8 +4,8 @@ import { getRepos } from '../src/repositories';
 import { getGroupFlags } from '../src/services/groupFlags';
 import {
   GROUP_ASSISTANT_COMMANDS,
-  GROUP_CUSTOMER_USAGE_GUIDE,
 } from '../src/services/groupAssistantCommandService';
+import { GROUP_FOLLOWUP_INTRO_MESSAGE } from '../src/services/groupReplyCopyService';
 import {
   CORRECTION_GROUP_ACK,
   clearCorrectionRemindersForTest,
@@ -228,7 +228,8 @@ describe('group syntax and private code UX 2026-06-10', () => {
     it('returns store-facing guide without admin syntax', async () => {
       await setupServicePeriod();
       const result = await processMessage(groupMsg(TEST_CUSTOMER, '小助手你會做什麼'));
-      expect(result.replies[0].text).toBe(GROUP_CUSTOMER_USAGE_GUIDE);
+      expect(result.replies[0].text).toBe(GROUP_FOLLOWUP_INTRO_MESSAGE);
+      expect(result.replies[0].text).not.toContain('30 天');
       expect(result.replies[0].text).not.toContain('確認更新');
       expect(result.replies[0].text).not.toContain('代回');
     });

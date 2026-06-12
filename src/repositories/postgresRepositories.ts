@@ -37,6 +37,7 @@ import {
   mapGroupRow,
   mapOverrideRow,
   mapThreadRow,
+  groupMetadataToJson,
   threadToMetadata,
 } from './mappers';
 
@@ -58,6 +59,7 @@ function defaultGroupFlags(groupId: string): GroupFlags {
     serviceReactivationPending: false,
     botLeftAt: null,
     servicePeriodEndNotified: false,
+    metadataJson: null,
   };
 }
 
@@ -92,6 +94,7 @@ function createGroupRepository(pool: Pool): GroupRepository {
           service_reactivation_pending = $10,
           bot_left_at = $11,
           service_period_end_notified = $12,
+          metadata_json = $13::jsonb,
           updated_at = NOW()
         WHERE group_id = $1`,
         [
@@ -107,6 +110,7 @@ function createGroupRepository(pool: Pool): GroupRepository {
           next.serviceReactivationPending,
           next.botLeftAt,
           next.servicePeriodEndNotified,
+          JSON.stringify(groupMetadataToJson(next.metadataJson)),
         ]
       );
       return this.getOrCreate(groupId);

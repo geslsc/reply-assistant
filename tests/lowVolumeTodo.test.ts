@@ -37,6 +37,7 @@ import {
   shouldSkipAutoReplyForThread,
 } from '../src/services/roundQuietService';
 import { createIssueThread, getActiveIssueThread } from '../src/services/issueThreadService';
+import { CHITCHAT_REDIRECT_POOL } from '../src/services/groupReplyCopyService';
 import { applySemanticClassification } from '../src/services/groupConvergenceActionService';
 import { classifyConsultantIntent, ConsultantIntent } from '../src/services/consultantIntentClassifier';
 import { handleConsultantMute } from '../src/services/consultantGroupControlService';
@@ -478,7 +479,9 @@ describe('low volume todo query type', () => {
         clarifyRound: 0,
       });
       expect(replies).toHaveLength(1);
-      expect(replies[0].text).toMatch(/操作問題/);
+      expect(
+        CHITCHAT_REDIRECT_POOL.some((pool) => replies[0].text?.includes(pool)),
+      ).toBe(true);
       expect(await getRepos().pendingHandoffs.findActionableByConsultant(TEST_CONSULTANT)).toHaveLength(
         0
       );

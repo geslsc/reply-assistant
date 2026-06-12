@@ -54,9 +54,15 @@ import {
 import {
   buildChitchatReply,
   buildQuestionOpeningReply,
+  hasOperationalQuestionClues,
   isQuestionOpeningMessage,
   isPureChitchatMessage,
 } from './groupConversationToneService';
+import {
+  CUSTOMER_OPERATION_STUCK_HANDOFF_MESSAGE,
+  assertHandoffCopyCompliance,
+  resolveHandoffCustomerMessage,
+} from './groupReplyCopyService';
 
 const MAX_CLARIFY_ROUNDS = 3;
 
@@ -114,14 +120,38 @@ async function clarifyUnknownOperationalQuestion(params: {
   });
 }
 
-function withCustomerBufferMessage(replies: BotReply[]): BotReply[] {
+function withCustomerBufferMessage(replies: BotReply[], customerQuestion: string): BotReply[] {
+  const handoffMessage = resolveHandoffCustomerMessage(customerQuestion);
+  assertHandoffCopyCompliance(handoffMessage);
   const hasBuffer = replies.some(
-    (r) => r.type === 'group' && r.text === CUSTOMER_HANDOFF_BUFFER_MESSAGE
+    (r) =>
+      r.type === 'group' &&
+      (r.text === CUSTOMER_HANDOFF_BUFFER_MESSAGE ||
+        r.text === CUSTOMER_OPERATION_STUCK_HANDOFF_MESSAGE)
   );
   if (hasBuffer) {
     return replies;
   }
-  return [{ type: 'group', text: CUSTOMER_HANDOFF_BUFFER_MESSAGE }, ...replies];
+  return [{ type: 'group', text: handoffMessage }, ...replies];
+}
+
+async function handlePureChitchatReply(params: {
+  groupId: string;
+  issueThreadId: string;
+  question: string;
+}): Promise<BotReply[]> {
+  const thread = await getIssueThread(params.groupId, params.issueThreadId);
+  const count = thread?.pureChitchatCount ?? 0;
+  if (count >= 2) {
+    await resolveThread(params.groupId, params.issueThreadId);
+    return [];
+  }
+
+  const round = (count + 1) as 1 | 2;
+  await updateIssueThread(params.groupId, params.issueThreadId, {
+    pureChitchatCount: count + 1,
+  });
+  return [{ type: 'group', text: await buildChitchatReply(params.question, round) }];
 }
 
 async function persistConvergenceState(
@@ -225,7 +255,7 @@ async function applyHandoff(params: {
     actorUserId: params.actorUserId,
     notifyTarget: GROUP_CONVERGENCE_HANDOFF_NOTIFY,
   });
-  return withCustomerBufferMessage(handoff.replies);
+  return withCustomerBufferMessage(handoff.replies, params.customerQuestion);
 }
 
 async function applyResolvedCard(params: {
@@ -405,10 +435,20 @@ export async function applySemanticClassification(params: {
     return [];
   }
 
-  if (classification.isChitchat || isPureChitchatMessage(params.question)) {
-    await resolveThread(params.groupId, params.issueThreadId);
-    return [{ type: 'group', text: await buildChitchatReply(params.question) }];
+  if (
+    (classification.isChitchat || isPureChitchatMessage(params.question)) &&
+    !hasOperationalQuestionClues(params.question)
+  ) {
+    return handlePureChitchatReply({
+      groupId: params.groupId,
+      issueThreadId: params.issueThreadId,
+      question: params.question,
+    });
   }
+
+  await updateIssueThread(params.groupId, params.issueThreadId, {
+    pureChitchatCount: 0,
+  });
 
   const candidates = await rankCandidatesForQuestion(params.question);
 
@@ -599,7 +639,8 @@ export async function applySemanticClassification(params: {
       question: params.question,
       actorUserId: params.customerUserId,
       notifyTarget: GROUP_CONVERGENCE_HANDOFF_NOTIFY,
-    })
+    }),
+    params.question
   );
 }
 

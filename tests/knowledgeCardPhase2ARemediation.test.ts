@@ -6,8 +6,8 @@ import { processMessage } from '../src/handlers/lineWebhookHandler';
 import {
   ADMIN_USAGE_GUIDE,
   CONSULTANT_USAGE_GUIDE,
-  GROUP_USAGE_GUIDE,
 } from '../src/services/knowledgeCardUsageGuideService';
+import { GROUP_FIRST_INTRO_MESSAGE } from '../src/services/groupReplyCopyService';
 import { handlePrivateUsageGuide } from '../src/services/knowledgeCardUsageGuideHandler';
 import { buildIdentityReply } from '../src/services/consultantIdentityService';
 import {
@@ -161,7 +161,7 @@ describe('Phase 2-A remediation acceptance tests', () => {
       text: '小助手使用說明',
       isGroup: true,
     });
-    expect(result.replies[0].text).toBe(GROUP_USAGE_GUIDE);
+    expect(result.replies[0].text).toBe(GROUP_FIRST_INTRO_MESSAGE);
     expect(result.replies.every((r) => r.type !== 'group' || !r.text?.includes('standard_answer'))).toBe(
       true
     );

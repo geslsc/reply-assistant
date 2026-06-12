@@ -86,12 +86,4 @@ export function getDeprecatedSyntaxHint(text: string): string | null {
   return DEPRECATED_GROUP_SYNTAX_HINTS[trimmed] ?? null;
 }
 
-export const GROUP_CUSTOMER_USAGE_GUIDE = `我是客立樂教學小助手，接下來的教學協助期間，我會和導入教練一起協助您處理操作使用上的問題。
-
-您可以直接在群組描述遇到的狀況，例如：
-「請問要怎麼新增預約？」
-「儲值卡要怎麼設定？」
-「這個畫面我不知道下一步要按哪裡」
-
-如果是基本的操作使用問題，我會提供教學步驟給您參考。
-如果是我目前還不會、需要確認，或不適合直接回答的問題，我會幫您整理起來，提醒導入教練協助確認。`;
+export { GROUP_FOLLOWUP_INTRO_MESSAGE as GROUP_CUSTOMER_USAGE_GUIDE } from './groupReplyCopyService';

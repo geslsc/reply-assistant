@@ -26,6 +26,7 @@ import { classifyCustomerQuestion } from '../src/services/groupSemanticRoutingSe
 import { isNonSubstantiveCustomerMessage } from '../src/services/groupMessageFilterService';
 import { isHighRiskCustomerMessage } from '../src/services/groupHighRiskService';
 import { buildRound1ClarifyMessage } from '../src/services/groupConvergenceStateService';
+import { CHITCHAT_REDIRECT_POOL, GROUP_FOLLOWUP_INTRO_MESSAGE } from '../src/services/groupReplyCopyService';
 import { validateKnowledgeCard } from '../src/services/knowledgeCardValidator';
 import { handleServiceIntroduction } from '../src/services/servicePeriodService';
 import { getEventsByType } from '../src/services/eventLogService';
@@ -225,13 +226,13 @@ describe('Group message convergence and semantic routing', () => {
     expect(next.replies.find((r) => r.type === 'group')?.text).toContain('登入');
   });
 
-  it('uses short lively chitchat replies without leaving an active issue thread', async () => {
+  it('uses chitchat pool redirect without leaving an active issue thread', async () => {
     const result = await processMessage(groupMsg(TEST_CUSTOMER, '好的謝謝'));
     const text = result.replies.find((r) => r.type === 'group')?.text ?? '';
 
-    expect(text).toContain('不客氣');
-    expect(text).toContain('操作問題');
-    expect(await getActiveIssueThread(TEST_GROUP)).toBeUndefined();
+    expect(CHITCHAT_REDIRECT_POOL.some((pool) => text.includes(pool))).toBe(true);
+    const thread = await getActiveIssueThread(TEST_GROUP);
+    expect(thread?.pureChitchatCount).toBe(1);
   });
 
   it('handoffs after three clarify rounds still unclear', async () => {
@@ -330,7 +331,7 @@ describe('Group message convergence and semantic routing', () => {
     await processMessage(groupMsg(TEST_CUSTOMER, '怎麼使用計次券'));
 
     const intro = await processMessage(groupMsg(TEST_CONSULTANT, '自我介紹一下'));
-    expect(intro.replies.find((r) => r.type === 'group')?.text).toContain('待命');
+    expect(intro.replies.find((r) => r.type === 'group')?.text).toBe(GROUP_FOLLOWUP_INTRO_MESSAGE);
     expect((await getActiveIssueThread(TEST_GROUP))?.consultantAnswered).toBe(false);
   });
 
@@ -401,7 +402,7 @@ describe('Group message convergence and semantic routing', () => {
     expect((await getActiveIssueThread(TEST_GROUP))?.consultantAnswered).toBe(true);
 
     const intro = await processMessage(groupMsg(TEST_CONSULTANT, '小助手自我介紹一下'));
-    expect(intro.replies.find((r) => r.type === 'group')?.text).toContain('待命');
+    expect(intro.replies.find((r) => r.type === 'group')?.text).toBe(GROUP_FOLLOWUP_INTRO_MESSAGE);
     expect(await getActiveIssueThread(TEST_GROUP)).toBeUndefined();
 
     const next = await processMessage(groupMsg(TEST_CUSTOMER, '怎麼登入後台'));

@@ -14,6 +14,7 @@ import { processMessage } from '../src/handlers/lineWebhookHandler';
 import { handleServiceIntroduction } from '../src/services/servicePeriodService';
 import { getRepos } from '../src/repositories';
 import { handleViewPendingHandoffs } from '../src/services/pendingHandoffService';
+import { CUSTOMER_HANDOFF_BUFFER_MESSAGE } from '../src/services/groupReplyCopyService';
 import { TEST_ADMIN, TEST_CONSULTANT, TEST_CUSTOMER, TEST_GROUP } from './helpers/testSetup';
 
 describe('LINE Reply / Push Tests', () => {
@@ -253,10 +254,7 @@ describe('LINE Reply / Push Tests', () => {
     });
     await deliverBotReplies(result.replies, 'reply-token');
 
-    expect(replyText).toHaveBeenCalledWith(
-      'reply-token',
-      '您的問題我已經記下並請導入教練協助確認，請稍等一下喔。'
-    );
+    expect(replyText).toHaveBeenCalledWith('reply-token', CUSTOMER_HANDOFF_BUFFER_MESSAGE);
     expect(replyText).not.toHaveBeenCalledWith(
       'reply-token',
       expect.stringContaining('查看待處理問題')

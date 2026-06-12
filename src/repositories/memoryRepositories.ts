@@ -49,6 +49,7 @@ function defaultGroupFlags(groupId: string): GroupFlags {
     serviceReactivationPending: false,
     botLeftAt: null,
     servicePeriodEndNotified: false,
+    metadataJson: null,
   };
 }
 

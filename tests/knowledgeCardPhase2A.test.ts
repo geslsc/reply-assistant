@@ -4,8 +4,8 @@ import { processMessage } from '../src/handlers/lineWebhookHandler';
 import {
   ADMIN_USAGE_GUIDE,
   CONSULTANT_USAGE_GUIDE,
-  GROUP_USAGE_GUIDE,
 } from '../src/services/knowledgeCardUsageGuideService';
+import { GROUP_FIRST_INTRO_MESSAGE } from '../src/services/groupReplyCopyService';
 import { handlePrivateUsageGuide } from '../src/services/knowledgeCardUsageGuideHandler';
 import { handleViewCommand } from '../src/services/knowledgeCardViewService';
 import {
@@ -112,7 +112,7 @@ describe('Knowledge card Phase 2-A', () => {
       text: '小助手使用說明',
       isGroup: true,
     });
-    expect(result.replies[0].text).toBe(GROUP_USAGE_GUIDE);
+    expect(result.replies[0].text).toBe(GROUP_FIRST_INTRO_MESSAGE);
   });
 
   it('customer group usage guide replies with store-facing guide', async () => {
@@ -122,7 +122,7 @@ describe('Knowledge card Phase 2-A', () => {
       text: '小助手你會做什麼',
       isGroup: true,
     });
-    expect(result.replies.some((r) => r.text === GROUP_USAGE_GUIDE)).toBe(true);
+    expect(result.replies.some((r) => r.text === GROUP_FIRST_INTRO_MESSAGE)).toBe(true);
   });
 
   it('bare usage guide without 小助手 prefix does not reply in group', async () => {

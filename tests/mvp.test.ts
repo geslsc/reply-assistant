@@ -1,5 +1,6 @@
 import {
   Actor,
+  CUSTOMER_HANDOFF_BUFFER_MESSAGE,
   EventType,
   PUBLIC_REPLY_SUFFIX,
   ThreadState,
@@ -150,9 +151,7 @@ describe('MVP Core Tests', () => {
       const result = await processMessage(groupMsg(TEST_CUSTOMER, '畫面一片空白'));
 
       const groupReply = result.replies.find((r) => r.type === 'group');
-      expect(groupReply?.text).toBe(
-        '您的問題我已經記下並請導入教練協助確認，請稍等一下喔。'
-      );
+      expect(groupReply?.text).toBe(CUSTOMER_HANDOFF_BUFFER_MESSAGE);
       expect(result.replies.filter((r) => r.type === 'push')).toHaveLength(0);
       expect((await getEventsByType(EventType.HANDOFF_TO_CONSULTANT)).length).toBe(1);
     });

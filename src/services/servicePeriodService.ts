@@ -7,26 +7,14 @@ import {
   updateGroupFlags,
 } from './groupFlags';
 import { ensureGroupAssignment } from './groupConsultantAssignmentService';
+import { GROUP_FIRST_INTRO_MESSAGE, GROUP_FOLLOWUP_INTRO_MESSAGE } from './groupReplyCopyService';
+import {
+  isGroupIntroShown,
+  markGroupIntroShown,
+  resolveGroupIntroMessage,
+} from './groupMetadataService';
 
-export const INTRO_MESSAGE = `老師好，我是客立樂教學小助手。
-
-接下來 30 天，我會和導入教練一起在這個群組協助您處理操作使用上的問題。
-
-遇到基本的操作使用問題時，可以直接在群組用文字描述，例如：
-「我的預約服務網站從哪邊設定？」
-「我的服務項目跟價格要在哪裡新增或調整？」
-「客人預約時可以選的服務要去哪裡開？」
-「店內基本資料、地址或 logo 要在哪裡修改？」
-「畫面出現錯誤訊息」
-
-我會先協助整理問題，並提供可以參考的操作教學步驟。
-
-如果是我目前還不會處理的問題，也會幫您整理起來，提醒導入教練後續協助您確認。
-
-如果我回覆的步驟和您畫面不一樣，也可以再跟我說，或等導入教練確認喔。`;
-
-const ALREADY_ACTIVE_MESSAGE =
-  '我已經在這個群組待命囉,接下來有常見操作問題可以直接在群組裡詢問。';
+export const INTRO_MESSAGE = GROUP_FIRST_INTRO_MESSAGE;
 
 const REACTIVATION_CONFIRM_PROMPT =
   '您確定要重新啟用教學協助期嗎?請回覆「確認重新啟用」以繼續。';
@@ -37,35 +25,40 @@ export async function handleServiceIntroduction(
 ): Promise<BotReply[]> {
   await ensureGroupAssignment(groupId);
 
-  if (await isInServicePeriod(groupId)) {
-    return [{ type: 'group', text: ALREADY_ACTIVE_MESSAGE }];
-  }
-
   if (await isServiceExpired(groupId)) {
     return [{ type: 'group', text: '教學協助期已結束,請使用「重新啟用教學協助期」指令。' }];
   }
 
-  const now = new Date();
-  const end = new Date(now);
-  end.setDate(end.getDate() + SERVICE_PERIOD_DAYS);
+  const introShown = await isGroupIntroShown(groupId);
+  const message = introShown ? GROUP_FOLLOWUP_INTRO_MESSAGE : GROUP_FIRST_INTRO_MESSAGE;
 
-  await updateGroupFlags(groupId, {
-    serviceStartAt: now.toISOString(),
-    serviceEndAt: end.toISOString(),
-  });
+  if (!(await isInServicePeriod(groupId))) {
+    const now = new Date();
+    const end = new Date(now);
+    end.setDate(end.getDate() + SERVICE_PERIOD_DAYS);
 
-  await createEvent({
-    event_type: EventType.STATE_TRANSITION,
-    group_id: groupId,
-    issue_thread_id: null,
-    actor: Actor.CONSULTANT,
-    actor_user_id: consultantUserId,
-    from_state: null,
-    to_state: null,
-    detail: 'service period started',
-  });
+    await updateGroupFlags(groupId, {
+      serviceStartAt: now.toISOString(),
+      serviceEndAt: end.toISOString(),
+    });
 
-  return [{ type: 'group', text: INTRO_MESSAGE }];
+    await createEvent({
+      event_type: EventType.STATE_TRANSITION,
+      group_id: groupId,
+      issue_thread_id: null,
+      actor: Actor.CONSULTANT,
+      actor_user_id: consultantUserId,
+      from_state: null,
+      to_state: null,
+      detail: 'service period started',
+    });
+  }
+
+  if (!introShown) {
+    await markGroupIntroShown(groupId, consultantUserId);
+  }
+
+  return [{ type: 'group', text: message }];
 }
 
 export async function handleServiceReactivationDirect(
@@ -122,19 +115,11 @@ export async function formatServicePeriodStatus(groupId: string): Promise<string
   return [
     '【群組服務期】',
     `群組：${groupName}`,
-    `服務開始：${start.toISOString().slice(0, 10)}`,
-    `服務結束：${end.toISOString().slice(0, 10)}`,
-    `剩餘天數：${remainingDays} 天`,
     `狀態：${status}`,
+    `開始：${start.toLocaleString('zh-TW')}`,
+    `結束：${end.toLocaleString('zh-TW')}`,
+    `剩餘：${remainingDays} 天`,
   ].join('\n');
-}
-
-export async function handleServiceReactivationRequest(
-  groupId: string,
-  _consultantUserId: string
-): Promise<BotReply[]> {
-  await updateGroupFlags(groupId, { serviceReactivationPending: true });
-  return [{ type: 'group', text: REACTIVATION_CONFIRM_PROMPT }];
 }
 
 export async function handleServiceReactivationConfirm(
@@ -143,7 +128,7 @@ export async function handleServiceReactivationConfirm(
 ): Promise<BotReply[]> {
   const flags = await getGroupFlags(groupId);
   if (!flags.serviceReactivationPending) {
-    return [];
+    return [{ type: 'group', text: '目前沒有待確認的重新啟用請求。' }];
   }
 
   const now = new Date();
@@ -167,7 +152,11 @@ export async function handleServiceReactivationConfirm(
     detail: 'service period reactivated',
   });
 
-  return [{ type: 'group', text: INTRO_MESSAGE }];
+  const { message, isFirstIntro } = await resolveGroupIntroMessage(groupId);
+  if (isFirstIntro) {
+    await markGroupIntroShown(groupId, consultantUserId);
+  }
+  return [{ type: 'group', text: message }];
 }
 
 export async function isOutOfService(groupId: string): Promise<boolean> {
@@ -210,3 +199,5 @@ export function parseServicePeriodQuery(
   }
   return null;
 }
+
+export { REACTIVATION_CONFIRM_PROMPT };

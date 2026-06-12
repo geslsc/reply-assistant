@@ -50,6 +50,7 @@ import {
   handleGroupUsageGuide,
   isUsageGuideRequest,
 } from '../services/knowledgeCardUsageGuideHandler';
+import { isIntroFollowUpQuestion } from '../services/groupReplyCopyService';
 import {
   classifyConsultantIntent,
   ConsultantIntent,
@@ -566,7 +567,7 @@ export async function processMessage(message: IncomingMessage): Promise<ProcessR
     }
 
     if (isGroupCustomerUsageGuideRequest(text)) {
-      replies.push(...handleGroupUsageGuide());
+      replies.push(...(await handleGroupUsageGuide(groupId, message.userId)));
       return { replies, events: await getEventLogs() };
     }
 
@@ -645,8 +646,8 @@ export async function processMessage(message: IncomingMessage): Promise<ProcessR
     return { replies, events: await getEventLogs() };
   }
 
-  if (isGroupCustomerUsageGuideRequest(text)) {
-    replies.push(...handleGroupUsageGuide());
+  if (isGroupCustomerUsageGuideRequest(text) || isIntroFollowUpQuestion(text)) {
+    replies.push(...(await handleGroupUsageGuide(groupId, message.userId)));
     return { replies, events: await getEventLogs() };
   }
 

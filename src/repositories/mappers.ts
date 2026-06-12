@@ -4,6 +4,7 @@ import {
   ConsultantRole,
   ConsultantStatus,
   GroupFlags,
+  GroupMetadata,
   IssueThread,
   IssueThreadStatus,
   ThreadState,
@@ -34,7 +35,25 @@ export function mapGroupRow(row: Record<string, unknown>): GroupFlags {
       ? new Date(String(row.bot_left_at)).toISOString()
       : null,
     servicePeriodEndNotified: Boolean(row.service_period_end_notified),
+    metadataJson: parseGroupMetadata(row.metadata_json),
   };
+}
+
+function parseGroupMetadata(raw: unknown): GroupMetadata | null {
+  if (raw == null) {
+    return null;
+  }
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    return {};
+  }
+  return { ...(raw as Record<string, unknown>) };
+}
+
+export function groupMetadataToJson(metadata: GroupMetadata | null | undefined): Record<string, unknown> {
+  if (!metadata) {
+    return {};
+  }
+  return { ...metadata };
 }
 
 export function mapThreadRow(row: Record<string, unknown>): IssueThread {
@@ -54,6 +73,8 @@ export function mapThreadRow(row: Record<string, unknown>): IssueThread {
     customerQuestion: metadata.customerQuestion ? String(metadata.customerQuestion) : null,
     autoReplyBlocked: Boolean(metadata.autoReplyBlocked),
     convergenceState: parseConvergenceState(metadata.convergenceState),
+    pureChitchatCount:
+      typeof metadata.pureChitchatCount === 'number' ? metadata.pureChitchatCount : 0,
   };
 }
 
@@ -144,5 +165,6 @@ export function threadToMetadata(thread: Partial<IssueThread>): Record<string, u
     customerQuestion: thread.customerQuestion ?? null,
     autoReplyBlocked: thread.autoReplyBlocked ?? false,
     convergenceState: thread.convergenceState ?? null,
+    pureChitchatCount: thread.pureChitchatCount ?? 0,
   };
 }

@@ -201,6 +201,7 @@ CREATE INDEX IF NOT EXISTS idx_pending_handoffs_group ON pending_handoffs(group_
 
 ALTER TABLE consultants ADD COLUMN IF NOT EXISTS last_knowledge_export_at TIMESTAMPTZ;
 ALTER TABLE group_flags ADD COLUMN IF NOT EXISTS group_name TEXT;
+ALTER TABLE group_flags ADD COLUMN IF NOT EXISTS metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE pending_handoffs ADD COLUMN IF NOT EXISTS snoozed BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE pending_handoffs ADD COLUMN IF NOT EXISTS acknowledged_at TIMESTAMPTZ;
 

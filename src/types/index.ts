@@ -66,6 +66,10 @@ export interface EventLogEntry {
   service_day: number | null;
 }
 
+export type GroupMetadata = Record<string, unknown> & {
+  intro_shown?: boolean;
+};
+
 export interface GroupFlags {
   groupId: string;
   groupName: string | null;
@@ -79,6 +83,7 @@ export interface GroupFlags {
   serviceReactivationPending: boolean;
   botLeftAt: string | null;
   servicePeriodEndNotified: boolean;
+  metadataJson?: GroupMetadata | null;
 }
 
 export interface ConvergenceOptionRef {
@@ -108,6 +113,7 @@ export interface IssueThread {
   customerQuestion: string | null;
   autoReplyBlocked?: boolean;
   convergenceState?: ConvergenceStateRef | null;
+  pureChitchatCount?: number;
 }
 
 export interface ConsultantRecord {
@@ -176,12 +182,11 @@ export interface ProcessResult {
   events: EventLogEntry[];
 }
 
-export const PUBLIC_REPLY_SUFFIX =
-  '如果這步驟和您畫面不一樣,再跟我說,或等顧問確認喔。';
-
-/** 不公開回答時對店家的固定緩衝話術（不可由 LLM 生成） */
-export const CUSTOMER_HANDOFF_BUFFER_MESSAGE =
-  '您的問題我已經記下並請導入教練協助確認，請稍等一下喔。';
+export {
+  CUSTOMER_HANDOFF_BUFFER_MESSAGE,
+  CUSTOMER_OPERATION_STUCK_HANDOFF_MESSAGE,
+  PUBLIC_REPLY_SUFFIX,
+} from '../services/groupReplyCopyService';
 
 export const STANDBY_PHRASES = [
   '有什麼可以協助您的嗎?',

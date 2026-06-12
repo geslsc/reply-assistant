@@ -1,13 +1,12 @@
-import { BotReply } from '../types';
-import { ConsultantRole } from '../types';
+import { BotReply, ConsultantRole } from '../types';
 import { isActiveAdmin, isActiveConsultantOrAdmin, getConsultant } from './consultantWhitelist';
 import { buildIdentityReply } from './consultantIdentityService';
 import {
   ADMIN_USAGE_GUIDE,
   CONSULTANT_USAGE_GUIDE,
-  GROUP_USAGE_GUIDE,
   matchUsageGuideTrigger,
 } from './knowledgeCardUsageGuideService';
+import { handleGroupIntroQuestion } from './groupIntroReplyService';
 
 export { matchUsageGuideTrigger } from './knowledgeCardUsageGuideService';
 
@@ -34,8 +33,11 @@ export async function handlePrivateUsageGuide(userId: string): Promise<BotReply[
   ];
 }
 
-export function handleGroupUsageGuide(): BotReply[] {
-  return [{ type: 'group', text: GROUP_USAGE_GUIDE }];
+export async function handleGroupUsageGuide(
+  groupId: string,
+  actorUserId?: string | null
+): Promise<BotReply[]> {
+  return handleGroupIntroQuestion(groupId, actorUserId);
 }
 
 export function isUsageGuideRequest(text: string): boolean {
